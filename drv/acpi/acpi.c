@@ -29,10 +29,7 @@ static uint8_t power_button_bit = 8; // Стандартный бит для к�
 static bool init_aml_power_detection(void) {
     if (aml_initialized) return true;
     
-    term_printf(term, "[ACPI] Initializing AML parser\n");
-    
     if (!aml_init_context(&g_aml_ctx, &g_acpi_ctx)) {
-        term_printf(term, "[ACPI] AML parser initialization failed\n");
         return false;
     }
     
@@ -71,33 +68,24 @@ static bool init_power_monitor(void) {
     power_button_info_t pwr_info;
     bool aml_found = aml_get_power_button_info(&pwr_info);
     
-    if (aml_found) {
-        term_printf(term, "[PWRMON] AML found power button:\n");
-        term_printf(term, "  EC Space: 0x%02X\n", pwr_info.ec_space_id);
-        term_printf(term, "  Offset: 0x%04X\n", pwr_info.power_button_offset);
-        term_printf(term, "  Bit: 0x%02X\n", pwr_info.power_button_bit);
-        
+    if (aml_found) {    
         // Настраиваем мониторинг на основе AML информации
         if (pwr_info.power_button_region == 0x81) { // IO Space
             // Для IO Space можно настроить прямое чтение порта
             pm1a_event_port = pwr_info.power_button_offset;
             power_button_bit = pwr_info.power_button_bit;
             
-            term_printf(term, "[PWRMON] Using AML IO port: 0x%04X, bit %d\n",
-                       pm1a_event_port, power_button_bit);
             return true;
         }
     }
     
     // Fallback к стандартному ACPI методу
     const char* emulator = detect_emulator();
-    term_printf(term, "[PWRMON] Platform: %s\n", emulator);
     
     if (g_acpi_ctx.fadt && g_acpi_ctx.acpi_enabled) {
         pm1a_event_port = g_acpi_ctx.fadt->pm1a_evt_blk;
         
         if (pm1a_event_port) {
-            term_printf(term, "[PWRMON] Using ACPI method (PM1a: 0x%x)\n", pm1a_event_port);
             
             // Включаем событие кнопки питания
             uint16_t enable_port = pm1a_event_port + 2; // Enable register
@@ -108,7 +96,6 @@ static bool init_power_monitor(void) {
         }
     }
     
-    term_printf(term, "[PWRMON] ACPI not available\n");
     return false;
 }
 
@@ -128,7 +115,6 @@ static bool check_aml_power_button(void) {
                     // Очищаем бит
                     outb(info->power_button_offset, value & ~(1 << info->power_button_bit));
                     
-                    term_printf(term, "[PWRMON] Power button via AML IO: 0x%02X\n", value);
                     return true;
                 }
             }
@@ -143,7 +129,6 @@ static bool check_aml_power_button(void) {
                     // Очищаем бит
                     *mem_addr = value & ~(1 << info->power_button_bit);
                     
-                    term_printf(term, "[PWRMON] Power button via AML Memory\n");
                     return true;
                 }
             }
@@ -167,7 +152,6 @@ static bool check_acpi_power_button(void) {
         
         // Очищаем событие
         outw(pm1a_event_port, (1 << power_button_bit));
-        term_printf(term, "[PWRMON] Power button pressed (ACPI)\n");
         return true;
     }
     
@@ -228,7 +212,6 @@ void acpi_monitor_power_button(void) {
             // Таймер обратного отсчёта с возможностью отмены
             bool cancelled = false;
             for (int i = 3; i > 0 && !cancelled; i--) {
-                term_printf(term, "[PWRMON] %d...\n", i);
                 
                 // Ждём 1 секунду с проверкой отмены
                 for (int j = 0; j < 100; j++) {

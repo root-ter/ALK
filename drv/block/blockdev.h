@@ -59,12 +59,6 @@ typedef struct blockdev {
         } ide;
         
         struct {
-            void *ahci_port;   /* Указатель на ahci_port_t */
-            void *ahci_ctrl;   /* Указатель на ahci_controller_t */
-            uint8_t port_num;  /* Номер порта AHCI */
-        } ahci;
-        
-        struct {
             void *ramdisk_data;
             size_t ramdisk_size;
         } ramdisk;
@@ -85,8 +79,6 @@ blockdev_t* blockdev_register(const char *name, blockdev_type_t type);
 /* Специальные функции регистрации для конкретных типов устройств */
 void blockdev_register_ide(void *ide_disk, const char *name, 
                           uint8_t channel, uint8_t drive);
-void blockdev_register_ahci(void *ahci_port, void *ahci_ctrl,
-                           const char *name, uint8_t port_num);
 void blockdev_scan_all_disks(void);
 
 /* Поиск устройства по имени */
@@ -131,4 +123,4 @@ static inline const char* blockdev_get_name(blockdev_t *dev) {
     return dev ? dev->name : "unknown";
 }
 
-#endif /* BLOCKDEV_H */
+#endif

@@ -18,9 +18,9 @@
 #include "drv/kbd/kbd.h"
 #include "drv/acpi/acpi.h"
 #include "drv/disk/ide.h"
-#include "drv/disk/ahci.h"
 #include "drv/block/blockdev.h"
 #include "drv/usb/ehci.h"
+#include "base/mem/pmem.h"
 
 /* символы из link.ld */
 extern char _heap_start;
@@ -38,21 +38,21 @@ void zombie_reaper_task(void)
         asm volatile("hlt");
     }
 }
-
+    
 void show_alk_logo(term_t* term) {
     term_printf(term, "\n");
     term_printf(term, "\n");
-    term_printf(term, "     _____ __     __   __\n");
-    mwait(200);
-    term_printf(term, "    / __  |  |   |  | / /\n");
-    mwait(200);
-    term_printf(term, "   / /__| |  |   |  |/ /\n");
-    mwait(200);
-    term_printf(term, "  /  __   |  |   |     |\n");
-    mwait(200);
-    term_printf(term, " /  /  |  |  |___|  |\\ \\ \n");
-    mwait(200);
-    term_printf(term, "/__/   |__|______|__| \\_\\ \n");
+    term_printf(term, "     _____ __     __   __   ____  ____\n");
+    mwait(100);
+    term_printf(term, "    / __  |  |   |  | / /  /    \\| ___|\n");
+    mwait(100);
+    term_printf(term, "   / /__| |  |   |  |/ /   | /\\ |||___\n");
+    mwait(100);
+    term_printf(term, "  /  __   |  |   |     |   | || ||___ |\n");
+    mwait(100);
+    term_printf(term, " /  /  |  |  |___|  |\\ \\   | \\/ | __| |\n");
+    mwait(100);
+    term_printf(term, "/__/   |__|______|__| \\_\\  \\____/|____|\n");
     term_printf(term, "\n");
 }
 
@@ -61,7 +61,6 @@ void show_alk_logo(term_t* term) {
 -------------------------------------------------------------*/
 void kmain(uint64_t mb2_addr)
 {
-    /* Инициализация прерываний и таймера */
     idt_install();
     init_system_clock();
     init_timer(500);
@@ -83,6 +82,8 @@ void kmain(uint64_t mb2_addr)
     uint32_t rows = (fb.height - 40) / (FONT_HEIGHT + 2);
     term = term_init(&fb, 20, 20, cols, rows);
     term_printf(term, "[TERM] Initialized\n");
+    
+    pmem_init(0);
 
     scheduler_init();
     term_printf(term, "[SCHEDULER] Initialized\n");
@@ -103,11 +104,6 @@ void kmain(uint64_t mb2_addr)
     } else {
 	rsod("ACPI_INIT_FAILED", "ACPI");
     }
-
-    task_create(acpi_monitor_power_button, 0, "PWRMON");
-    term_printf(term, "[SCHEDULER] Created task: 'PWRMON'\n");
-
-    mwait(100); // Для инициализации PWRMON задачи
 
     term_printf(term, "Initializing disk controllers...\n");
 
@@ -131,8 +127,6 @@ void kmain(uint64_t mb2_addr)
         }
     }
 
-    bool ahci_found = ahci_init(term);
-    
     term_printf(term, "Initializing block device layer...\n");
     blockdev_init();
 
@@ -140,9 +134,12 @@ void kmain(uint64_t mb2_addr)
 
     /* Разрешаем прерывания */
     asm volatile("sti");
+    
+    pmem_stats();
+    pmem_dump_map();
 
     show_alk_logo(term);
-
+    
     can_type = true;
     term_enable_prompt(term);
     term_set_prompt_text(term, "> ");

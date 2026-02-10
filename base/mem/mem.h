@@ -21,5 +21,8 @@ void *malloc(size_t size);
 void free(void *ptr);
 void *realloc(void *ptr, size_t new_size);
 void get_kmalloc_stats(kmalloc_stats_t *st);
+// Выровненное выделение
+void* malloc_aligned(size_t size, size_t alignment);
+void free_aligned(void* ptr);
 
 #endif

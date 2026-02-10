@@ -50,5 +50,6 @@ extern void isr33();
 extern void isr46();
 extern void isr47();
 extern void isr48();
+extern void page_fault_simple();
 
 #endif // ISR_H

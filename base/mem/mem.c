@@ -346,3 +346,43 @@ static char *u32_to_dec(uint32_t v, char *buf)
     buf[i] = '\0';
     return buf;
 }
+
+void* malloc_aligned(size_t size, size_t alignment) {
+    if (alignment < ALIGN) {
+        alignment = ALIGN;
+    }
+    
+    // Требуем, чтобы alignment было степенью двойки
+    if ((alignment & (alignment - 1)) != 0) {
+        return NULL;
+    }
+    
+    // Выделяем с запасом для хранения оригинального указателя и выравнивания
+    size_t total_size = size + alignment - 1 + sizeof(void*);
+    void* original_ptr = malloc(total_size);
+    if (!original_ptr) {
+        return NULL;
+    }
+    
+    // Вычисляем выровненный указатель
+    uintptr_t addr = (uintptr_t)original_ptr + sizeof(void*);
+    uintptr_t aligned_addr = (addr + alignment - 1) & ~(alignment - 1);
+    
+    // Сохраняем оригинальный указатель перед выровненной областью
+    void** ptr_store = (void**)(aligned_addr - sizeof(void*));
+    *ptr_store = original_ptr;
+    
+    return (void*)aligned_addr;
+}
+
+/* Освобождение выровненной памяти */
+void free_aligned(void* ptr) {
+    if (!ptr) return;
+    
+    // Получаем оригинальный указатель
+    void** ptr_store = (void**)((uintptr_t)ptr - sizeof(void*));
+    void* original_ptr = *ptr_store;
+    
+    free(original_ptr);
+}
+

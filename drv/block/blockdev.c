@@ -1,6 +1,5 @@
 #include "blockdev.h"
 #include "../disk/ide.h"
-#include "../disk/ahci.h"
 #include "../../base/mem/mem.h"
 #include "../../libc/string.h"
 #include "../../base/term/term.h"
@@ -63,77 +62,6 @@ static int ide_write_wrapper(blockdev_t *bdev, uint64_t lba,
 
 static int ide_flush_wrapper(blockdev_t *bdev) {
     /* IDE автоматически сбрасывает кэш после каждой записи */
-    return 0;
-}
-
-static int ahci_read_wrapper(blockdev_t *bdev, uint64_t lba, 
-                            uint32_t count, void *buffer) {
-    if (!bdev || !buffer || count == 0) {
-        return -1;
-    }
-    
-    ahci_port_t *port = (ahci_port_t*)bdev->device_data.ahci.ahci_port;
-    ahci_controller_t *ctrl = (ahci_controller_t*)bdev->device_data.ahci.ahci_ctrl;
-    
-    if (!port || !ctrl || !port->has_device) {
-        bdev->error_count++;
-        return -1;
-    }
-    
-    if (lba + count > port->sectors) {
-        term_printf(term, "[BLOCKDEV] AHCI read out of bounds: LBA=%llu, Count=%u, Max=%llu\n",
-                   lba, count, port->sectors);
-        bdev->error_count++;
-        return -1;
-    }
-    
-    bool success = ahci_read(port, lba, count, buffer);
-    
-    if (success) {
-        bdev->read_count++;
-        return 0;
-    }
-    
-    bdev->error_count++;
-    return -1;
-}
-
-static int ahci_write_wrapper(blockdev_t *bdev, uint64_t lba, 
-                             uint32_t count, const void *buffer) {
-    if (!bdev || !buffer || count == 0) {
-        return -1;
-    }
-    
-    ahci_port_t *port = (ahci_port_t*)bdev->device_data.ahci.ahci_port;
-    ahci_controller_t *ctrl = (ahci_controller_t*)bdev->device_data.ahci.ahci_ctrl;
-    
-    if (!port || !ctrl || !port->has_device) {
-        bdev->error_count++;
-        return -1;
-    }
-    
-    if (lba + count > port->sectors) {
-        term_printf(term, "[BLOCKDEV] AHCI write out of bounds: LBA=%llu, Count=%u, Max=%llu\n",
-                   lba, count, port->sectors);
-        bdev->error_count++;
-        return -1;
-    }
-    
-    bool success = ahci_write(port, lba, count, buffer);
-    
-    if (success) {
-        bdev->write_count++;
-        return 0;
-    }
-    
-    bdev->error_count++;
-    return -1;
-}
-
-static int ahci_flush_wrapper(blockdev_t *bdev) {
-    // AHCI автоматически сбрасывает кэш контроллера
-    // При желании можно добавить команду FLUSH CACHE EXT (0xEA)
-    // Но этого я делать не буду :)
     return 0;
 }
 
@@ -342,15 +270,7 @@ void blockdev_get_info(blockdev_t *dev, char *buffer, size_t buf_size) {
     /* Дополнительная информация в зависимости от типа */
     char extra_info[128] = "";
     
-    if (dev->type == BLOCKDEV_TYPE_AHCI) {
-        ahci_port_t *port = (ahci_port_t*)dev->device_data.ahci.ahci_port;
-        if (port) {
-            snprintf(extra_info, sizeof(extra_info), 
-                    "\nAHCI Port: %d, Speed: Gen%d",
-                    dev->device_data.ahci.port_num,
-                    port->sata_speed);
-        }
-    } else if (dev->type == BLOCKDEV_TYPE_IDE) {
+    if (dev->type == BLOCKDEV_TYPE_IDE) {
         snprintf(extra_info, sizeof(extra_info),
                 "\nIDE Channel: %s, Drive: %s",
                 dev->device_data.ide.channel == 0 ? "Primary" : "Secondary",
@@ -433,22 +353,11 @@ void blockdev_dump_all(void) {
             case BLOCKDEV_NO_MEDIA: status_str = "NO MEDIA"; break;
         }
         
-        // Дополнительная информация для AHCI
-        char extra[32] = "";
-        if (dev->type == BLOCKDEV_TYPE_AHCI) {
-            snprintf(extra, sizeof(extra), "P%d", dev->device_data.ahci.port_num);
-        } else if (dev->type == BLOCKDEV_TYPE_IDE) {
-            snprintf(extra, sizeof(extra), "C%dD%d", 
-                    dev->device_data.ide.channel,
-                    dev->device_data.ide.drive);
-        }
-        
-        term_printf(term, "%d. %-8s [%-6s] %-6s %-4s %12s  Sectors: %-8lu\n",
+        term_printf(term, "%d. %-8s [%-6s] %-6s %12s  Sectors: %-8lu\n",
                    index++,
                    dev->name,
                    type_str,
                    status_str,
-                   extra,
                    size_str,
                    (unsigned long)dev->total_sectors);
         
@@ -498,42 +407,7 @@ void blockdev_register_ide(void *ide_disk_ptr, const char *name,
                name, (unsigned long)(bdev->total_bytes / (1024 * 1024))); /* Приведение типа */
 }
 
-void blockdev_register_ahci(void *ahci_port_ptr, void *ahci_ctrl_ptr,
-                           const char *name, uint8_t port_num) {
-    ahci_port_t *port = (ahci_port_t*)ahci_port_ptr;
-    ahci_controller_t *ctrl = (ahci_controller_t*)ahci_ctrl_ptr;
-    
-    if (!port || !ctrl || !port->has_device) {
-        term_printf(term, "[BLOCKDEV] AHCI port %d has no device\n", port_num);
-        return;
-    }
-    
-    /* Создаём блочное устройство */
-    blockdev_t *bdev = blockdev_register(name, BLOCKDEV_TYPE_AHCI);
-    if (!bdev) return;
-    
-    /* Заполняем информацию */
-    bdev->sector_size = port->sector_size;
-    bdev->total_sectors = port->sectors;
-    bdev->total_bytes = port->sectors * port->sector_size;
-    bdev->supports_lba48 = port->lba48;
-    
-    /* Устанавливаем обработчики AHCI */
-    bdev->read_sectors = ahci_read_wrapper;
-    bdev->write_sectors = ahci_write_wrapper;
-    bdev->flush_cache = ahci_flush_wrapper;
-    
-    /* Сохраняем специфичные данные */
-    bdev->device_data.ahci.ahci_port = port;
-    bdev->device_data.ahci.ahci_ctrl = ctrl;
-    bdev->device_data.ahci.port_num = port_num;
-    
-    /* Устанавливаем статус */
-    bdev->status = BLOCKDEV_READY;
-    
-    term_printf(term, "[BLOCKDEV] AHCI device %s registered (%lu MB)\n",
-               name, (unsigned long)(bdev->total_bytes / (1024 * 1024)));
-}
+
 
 /* Автоматическое сканирование и регистрация всех дисков */
 void blockdev_scan_all_disks(void) {
@@ -550,21 +424,6 @@ void blockdev_scan_all_disks(void) {
             if (disks[idx].type != IDE_TYPE_NONE) {
                 snprintf(dev_name, sizeof(dev_name), "dsk_%d", disk_counter++);
                 blockdev_register_ide(&disks[idx], dev_name, ch, dr);
-            }
-        }
-    }
-    
-    /* 2. Сканируем AHCI диски */
-    term_printf(term, "  Scanning AHCI controller...\n");
-    ahci_controller_t *ctrl = ahci_get_controller();
-    
-    if (ctrl && ctrl->initialized) {
-        for (uint8_t port_num = 0; port_num < ctrl->port_count; port_num++) {
-            ahci_port_t *port = &ctrl->ports[port_num];
-            
-            if (port->active && port->has_device) {
-                snprintf(dev_name, sizeof(dev_name), "dsk_%d", disk_counter++);
-                blockdev_register_ahci(port, ctrl, dev_name, port_num);
             }
         }
     }

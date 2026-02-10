@@ -36,7 +36,7 @@ void idt_install(void)
         isr_stub_0, isr_stub_1, isr_stub_2, isr_stub_3,
         isr_stub_4, isr_stub_5, isr_stub_6, isr_stub_7,
         isr_stub_8, isr_stub_9, isr_stub_10, isr_stub_11,
-        isr_stub_12, isr_stub_13, isr_stub_14, isr_stub_15,
+        isr_stub_12, isr_stub_13, isr_stub_15,
         isr_stub_16, isr_stub_17, isr_stub_18, isr_stub_19,
         isr_stub_20, isr_stub_21, isr_stub_22, isr_stub_23,
         isr_stub_24, isr_stub_25, isr_stub_26, isr_stub_27,
@@ -53,6 +53,7 @@ void idt_install(void)
     idt_set_gate(KEYBOARD, isr33, KERNEL_CODE_SEL, IDT_GATE_INT);
     idt_set_gate(IRQ14, isr46, KERNEL_CODE_SEL, IDT_GATE_INT); // IDE Primary
     idt_set_gate(IRQ15, isr47, KERNEL_CODE_SEL, IDT_GATE_INT); // IDE Secondary
+    idt_set_gate(14, page_fault_simple, KERNEL_CODE_SEL, IDT_GATE_INT);
 
     /* Загружаем IDT через 64-bit asm-обёртку */
     lidt_load(&idtp);
