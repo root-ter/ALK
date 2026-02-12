@@ -1,16 +1,14 @@
 #include "tss.h"
 #include "../rsod/rsod.h"
 
-extern tss_t tss_buffer;
+extern char _tss_buffer[];
 extern uint64_t gdt[];
-extern uint64_t stack64_top;
+extern char _stack_end[];
 
-static tss_t *tss = NULL;
+static tss_t *tss = (tss_t*)_tss_buffer;
 
 void tss_init(void)
 {
-    tss = &tss_buffer;
-
     if (!tss)
     {
         rsod("TSS_ALLOCATION_FAILED", "TSS");
@@ -21,7 +19,7 @@ void tss_init(void)
         ((uint8_t *)tss)[i] = 0;
 
     /* Инициализируем rsp0 с начального kernel stack */
-    tss->rsp0 = (uint64_t)&stack64_top;
+    tss->rsp0 = (uint64_t)&_stack_end;
 
     if (tss->rsp0 == 0)
     {

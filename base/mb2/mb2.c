@@ -2,9 +2,9 @@
 #include "../rsod/rsod.h"
 #include <string.h>
 #include <stdint.h>
-#include "../mem/mem.h"
 
 #define MAX_MMAP_ENTRIES 64
+static mb2_mmap_entry_t mmap_entries_static[MAX_MMAP_ENTRIES];
 
 /* Константы для работы с Multiboot2 */
 #define MB2_TAG_HDR_SIZE 8 /* Размер заголовка тега Multiboot2 (type + size) */
@@ -260,7 +260,8 @@ static void process_mmap_tag(uint8_t *payload, size_t payload_len) {
     mmap_entry_size = entry_size;
     
     // Выделяем память для записей
-    mmap_entries = (mb2_mmap_entry_t*)malloc(mmap_entry_count * sizeof(mb2_mmap_entry_t));
+    if (mmap_entry_count > MAX_MMAP_ENTRIES) mmap_entry_count = MAX_MMAP_ENTRIES;
+    mmap_entries = mmap_entries_static;
     if (!mmap_entries) {
         mmap_entry_count = 0;
         return;

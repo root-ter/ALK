@@ -20,15 +20,19 @@
 #include "drv/disk/ide.h"
 #include "drv/block/blockdev.h"
 #include "drv/usb/ehci.h"
-#include "base/mem/pmem.h"
+#include "base/mem/pmm.h"
+
 
 /* символы из link.ld */
 extern char _heap_start;
 extern char _heap_end;
+
+// Глобальные переменные
 extern void acpi_monitor_power_button(void);
 term_t* term;
 framebuffer_t fb;
 ide_disk_t disks[4];
+pmm_t pmm;
 
 void zombie_reaper_task(void)
 {
@@ -38,7 +42,7 @@ void zombie_reaper_task(void)
         asm volatile("hlt");
     }
 }
-    
+ 
 void show_alk_logo(term_t* term) {
     term_printf(term, "\n");
     term_printf(term, "\n");
@@ -69,21 +73,20 @@ void kmain(uint64_t mb2_addr)
 
     can_type = false;
 
-    /* Устанавливаем конец кучи на конец ОЗУ (с небольшим запасом) */
-    size_t heap_size = (size_t)((uintptr_t)&_heap_end - (uintptr_t)&_heap_start);
-    malloc_init(&_heap_start, heap_size);
-
     mb2_parse(mb2_addr);
     if(!fb_init(&fb)) {
         for (;;) asm volatile ("hlt");
     }
+    
+    pmm_init(&pmm, mb2_addr);
+    
+    size_t heap_size = (size_t)((uintptr_t)&_heap_end - (uintptr_t)&_heap_start);
+    malloc_init(&_heap_start, heap_size);
 
     uint32_t cols = (fb.width - 40) / (FONT_WIDTH + 1);
     uint32_t rows = (fb.height - 40) / (FONT_HEIGHT + 2);
     term = term_init(&fb, 20, 20, cols, rows);
     term_printf(term, "[TERM] Initialized\n");
-    
-    pmem_init(0);
 
     scheduler_init();
     term_printf(term, "[SCHEDULER] Initialized\n");
@@ -98,9 +101,6 @@ void kmain(uint64_t mb2_addr)
 
     if (acpi_init()) {
         term_printf(term, "[ACPI] Found %d CPU(s)\n", acpi_get_cpu_count());
-        
-        // Дамп информации
-        acpi_dump_info();
     } else {
 	rsod("ACPI_INIT_FAILED", "ACPI");
     }
@@ -134,9 +134,6 @@ void kmain(uint64_t mb2_addr)
 
     /* Разрешаем прерывания */
     asm volatile("sti");
-    
-    pmem_stats();
-    pmem_dump_map();
 
     show_alk_logo(term);
     

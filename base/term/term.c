@@ -161,8 +161,8 @@ term_t* term_init(framebuffer_t* fb, uint32_t x, uint32_t y,
     term->cursor_y = 0;
     term->scroll_offset = 0;
     term->total_lines = 0;
-    term->bg_color = (color_t){0, 0, 0};
-    term->fg_color = (color_t){200, 200, 200};
+    term->bg_color = (color_t){128, 0, 128};
+    term->fg_color = (color_t){255, 255, 255};
     
     // История
     term->history_size = HISTORY_CAPACITY;

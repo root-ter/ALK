@@ -46,6 +46,7 @@ global gdt
 global tss_buffer
 global stack64_top
 extern kmain
+extern _stack_end
 
 start:
     cli
@@ -85,7 +86,7 @@ long_mode_entry:
     mov ss, ax
     
     ; Стек
-    lea rsp, [rel stack64_top]
+    lea rsp, [rel _stack_end]
     and rsp, -16
     
     ; Вызов ядра (rbx = multiboot info)
@@ -115,40 +116,50 @@ gdt_desc:
     dq gdt
 
 ; -----------------------------------------------------------------------
-; Stack
-; -----------------------------------------------------------------------
-section .bss
-align 16
-stack64_bottom:
-    resb 65536
-stack64_top:
-
-; TSS
-align 16
-tss_buffer:
-    resb 104
-
-; -----------------------------------------------------------------------
 ; Page Tables - УПРОЩЕННАЯ ВЕРСИЯ (работающая)
 ; -----------------------------------------------------------------------
 section .data
 align 4096
 
-; PML4 Table
-pml4_table:
-    dq pdpt_low + 0x007    ; PML4[0] -> PDPT low (0-512GB)
-    times 510 dq 0         ; PML4[1]..PML4[510] = 0
-    dq pml4_table + 0x007  ; PML4[511] -> recursive mapping
-    dq 0                   ; Выравнивание
+global pml4_table
 
-; PDPT для low memory (только первые 4GB)
+pml4_table:
+    dq pdp_low + 0x007     ; 0-512GB (пользователь)
+    times 254 dq 0         ; Неиспользуемые записи
+    dq pdp_high + 0x007    ; 0xFFFFFF8000000000-... (ядро)
+    dq pml4_table + 0x007  ; Recursive mapping (последняя запись)
+
+; PDPT для низкой памяти (пользователь)
 align 4096
-pdpt_low:
+pdp_low:
     dq pd_table0 + 0x007   ; 0-1GB
     dq pd_table1 + 0x007   ; 1-2GB
     dq pd_table2 + 0x007   ; 2-3GB
     dq pd_table3 + 0x007   ; 3-4GB
     times 508 dq 0         ; Остальное не мапим пока
+
+; PDPT для высокой памяти (ядро)
+align 4096
+pdp_high:
+    times 510 dq 0         ; Заполняем позже
+    dq pd_kernel0 + 0x007  ; -512GB до -511GB (ядро)
+    dq pd_kernel1 + 0x007  ; -511GB до -510GB (ядро)
+
+; PD таблицы для ядра (2MB страницы)
+align 4096
+pd_kernel0:
+%assign i 0
+%rep 512
+    dq (i * 0x200000) + 0x083  ; Identity map первые 1GB
+%assign i i+1
+%endrep
+
+pd_kernel1:
+%assign i 512
+%rep 512
+    dq (i * 0x200000) + 0x083  ; Следующие 1GB
+%assign i i+1
+%endrep
 
 ; PD tables (2MB страницы) для 0-4GB
 ; Просто identity mapping, NX=0 для всех (можно исполнять)

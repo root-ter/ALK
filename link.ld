@@ -7,8 +7,7 @@ PHDRS
   data PT_LOAD FLAGS(6); /* PF_R | PF_W */
 }
 
-SECTIONS
-{
+SECTIONS {
   . = 0x00100000;
 
   _kernel_start = .;
@@ -31,12 +30,21 @@ SECTIONS
     *(.bss)
     *(.bss*)
     *(COMMON)
+    
+    . = ALIGN(16);
+    _stack_start = .;
+    . += 65536;        /* 64 KB stack */
+    _stack_end = .;
+    
+    . = ALIGN(16);
+    _tss_buffer = .;
+    . += 104;          /* TSS */
   } :data
 
   .heap (NOLOAD) : {
     . = ALIGN(8);
     _heap_start = .;
-    . = . + 512 * 1024 * 1024;
+    . = . + 512 * 1024 * 1024;  /* 512 MB кучи */
     _heap_end = .;
   } :data
 
