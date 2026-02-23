@@ -41,6 +41,8 @@ typedef struct {
     
     // Флаги состояния
     bool needs_redraw;                // Нужна перерисовка
+
+    volatile int lock;
 } term_t;
 
 // Инициализация

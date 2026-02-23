@@ -3,6 +3,7 @@
 #include "../pic/pic.h"
 #include "../../base/term/term.h"
 #include "../../base/term/cmd.h"
+#include "../usb/ehci/ehci.h"
 
 #define INTERNAL_SPACE 0x01
 

@@ -31,6 +31,7 @@ static void cmd_help(void) {
     term_printf(term, "  disklist        - Show disk list\n");
     term_printf(term, "  diskinfo <disk> - Show disk info\n");
     term_printf(term, "  diskread <disk> <lba> <count> - Read disk\n");
+    term_printf(term, "  alk             - Show ALK version\n");
 }
 
 static void cmd_clear(void) {
@@ -348,6 +349,21 @@ static void cmd_diskread(char* args) {
     free(buffer);
 }
 
+void cmd_alk(void) {
+    term_printf(term, "\n");
+    term_printf(term, "     _____ __     __   __   ____  ____\n");
+    term_printf(term, "    / __  |  |   |  | / /  /    \\| ___|\n");
+    term_printf(term, "   / /__| |  |   |  |/ /   | /\\ |||___\n");
+    term_printf(term, "  /  __   |  |   |     |   | || ||___ |\n");
+    term_printf(term, " /  /  |  |  |___|  |\\ \\   | \\/ | __| |\n");
+    term_printf(term, "/__/   |__|______|__| \\_\\  \\____/|____|\n");
+    term_printf(term, "\n");
+    term_printf(term, "ALK OS v0.02\n");
+    term_printf(term, "Shell:\n");
+    term_printf(term, "  ALKShell\n");
+    term_printf(term, "\nWe hope you have a good experience by using ALK :)\n");
+}
+
 // ==================== ОСНОВНАЯ ФУНКЦИЯ ОБРАБОТКИ КОМАНД ====================
 
 int term_execute_command(char* cmdline) {
@@ -406,6 +422,8 @@ int term_execute_command(char* cmdline) {
     	cmd_diskinfo(args);
     } else if (strcmp(cmd, "diskread") == 0) {
     	cmd_diskread(args); 
+    } else if (strcmp(cmd, "alk") == 0) {
+        cmd_alk();
     } else {
         term_printf(term, "Unknown command: %s\n", cmd);
         term_printf(term, "Type 'help' for available commands\n");

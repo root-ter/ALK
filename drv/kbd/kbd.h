@@ -110,5 +110,6 @@ char kbd_getchar(void); /* возвращает -1 если буфер пуст,
 
 unsigned long irq_save_flags(void);
 void irq_restore_flags(unsigned long flags);
+void kbd_buffer_push(char c);
 
 #endif

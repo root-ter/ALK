@@ -163,6 +163,7 @@ term_t* term_init(framebuffer_t* fb, uint32_t x, uint32_t y,
     term->total_lines = 0;
     term->bg_color = (color_t){128, 0, 128};
     term->fg_color = (color_t){255, 255, 255};
+    term->lock = 0;
     
     // История
     term->history_size = HISTORY_CAPACITY;
@@ -468,6 +469,10 @@ void term_get_cursor(term_t* term, uint32_t* x, uint32_t* y) {
 // ==================== ФОРМАТИРОВАННЫЙ ВЫВОД ====================
 
 void term_printf(term_t* term, const char* fmt, ...) {
+    while (__sync_lock_test_and_set(&term->lock, 1)) {
+        asm volatile("pause");
+    }
+    __sync_synchronize();
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -873,6 +878,9 @@ void term_printf(term_t* term, const char* fmt, ...) {
     va_end(args);
     
     term_puts(term, buffer);
+
+    __sync_synchronize();
+    __sync_lock_release(&term->lock);
 }
 
 void term_clear_prompt(term_t* term) {

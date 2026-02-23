@@ -13,7 +13,7 @@
 #include <stddef.h>
 
 // Глобальный контекст
-static acpi_context_t g_acpi_ctx;
+acpi_context_t g_acpi_ctx;
 extern term_t* term;
 static aml_context_t g_aml_ctx;
 static bool aml_initialized = false;

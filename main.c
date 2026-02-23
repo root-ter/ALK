@@ -19,9 +19,9 @@
 #include "drv/acpi/acpi.h"
 #include "drv/disk/ide.h"
 #include "drv/block/blockdev.h"
-#include "drv/usb/ehci.h"
+#include "drv/usb/usbdev/usbdev.h"
+#include "drv/usb/ehci/ehci.h"
 #include "base/mem/pmm.h"
-
 
 /* символы из link.ld */
 extern char _heap_start;
@@ -132,8 +132,13 @@ void kmain(uint64_t mb2_addr)
 
     blockdev_scan_all_disks();
 
+    usb_core_init(term);
+    ehci_init(term, &pmm);
+        
     /* Разрешаем прерывания */
     asm volatile("sti");
+
+    usb_dump_all();
 
     show_alk_logo(term);
     

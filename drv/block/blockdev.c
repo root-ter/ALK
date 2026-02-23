@@ -270,7 +270,7 @@ void blockdev_get_info(blockdev_t *dev, char *buffer, size_t buf_size) {
     /* Дополнительная информация в зависимости от типа */
     char extra_info[128] = "";
     
-    if (dev->type == BLOCKDEV_TYPE_IDE) {
+   if (dev->type == BLOCKDEV_TYPE_IDE) {
         snprintf(extra_info, sizeof(extra_info),
                 "\nIDE Channel: %s, Drive: %s",
                 dev->device_data.ide.channel == 0 ? "Primary" : "Secondary",
@@ -407,8 +407,6 @@ void blockdev_register_ide(void *ide_disk_ptr, const char *name,
                name, (unsigned long)(bdev->total_bytes / (1024 * 1024))); /* Приведение типа */
 }
 
-
-
 /* Автоматическое сканирование и регистрация всех дисков */
 void blockdev_scan_all_disks(void) {
     term_printf(term, "[BLOCKDEV] Scanning for all disks...\n");
@@ -416,7 +414,7 @@ void blockdev_scan_all_disks(void) {
     int disk_counter = 1;
     char dev_name[BLOCKDEV_NAME_LEN];
     
-    /* 1. Сканируем IDE диски */
+    // 1. IDE диски (уже есть)
     term_printf(term, "  Scanning IDE controllers...\n");
     for (int ch = 0; ch < 2; ch++) {
         for (int dr = 0; dr < 2; dr++) {
@@ -428,6 +426,6 @@ void blockdev_scan_all_disks(void) {
         }
     }
     
-    term_printf(term, "[BLOCKDEV] Scan complete. Found %d devices.\n", 
+    term_printf(term, "\n[BLOCKDEV] Scan complete. Found %d devices.\n", 
                 blockdev_count);
 }
