@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "tss.h"
+#include "../mem/paging.h"
 
 #define USER_CS ((uint64_t)0x18 | 3) /* 0x1B */
 #define USER_SS ((uint64_t)0x20 | 3) /* 0x23 */
@@ -145,6 +146,7 @@ void task_create(void (*entry)(void), size_t stack_size, const char *name)
     t->exit_code = 0;
     t->next = NULL;
     t->name = strdup(name);
+    t->page_table = NULL;
 
     void *kstack_top = (char *)kstack + stack_size;
     t->regs = prepare_initial_stack(entry,
@@ -226,6 +228,7 @@ void schedule_from_isr(uint64_t *regs, uint64_t **out_regs_ptr)
         g_syscall_kstack_top = (uint64_t)current->kstack + current->kstack_size;
         /* Обновляем TSS */
         tss_update_rsp0(g_syscall_kstack_top);
+        paging_switch(current->page_table);
         return;
     }
 
@@ -302,6 +305,12 @@ static void free_task_resources(task_t *t)
     { // Освобождаем память, выделенную для имени
         free(t->name);
         t->name = NULL;
+    }
+    
+    if (t->page_table)
+    {
+    	paging_destroy_user_task(t->page_table);
+    	t->page_table = NULL;
     }
 
     free(t);
@@ -468,6 +477,14 @@ uint64_t utask_create(void (*entry)(void),
     t->user_mem = user_mem;
     t->user_mem_size = user_mem_size;
     t->name = strdup(name);
+    t->page_table = paging_create_user_task(user_mem, user_mem_size);
+    if (!t->page_table)
+    {
+        // Не удалось создать таблицы страниц — задачу запускать нельзя.
+        free(kstack);
+        free(t);
+        return 0;
+    }
 
     void *user_stack_top = (char *)user_mem + user_mem_size;
     void *kstack_top = (char *)kstack + stack_size;

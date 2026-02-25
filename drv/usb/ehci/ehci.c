@@ -73,20 +73,24 @@
 #define EHCI_LINK_TYPE_FSTN  (3 << 1)
 
 // QTD token bits
-#define QTD_PID_OUT          (0 << 8)
-#define QTD_PID_IN           (1 << 8)
-#define QTD_PID_SETUP        (2 << 8)
-#define QTD_ACTIVE           (1 << 7)
-#define QTD_HALTED           (1 << 6)
-#define QTD_DATABUFF_ERR     (1 << 5)
-#define QTD_BABBLE           (1 << 4)
-#define QTD_XACT_ERR         (1 << 3)
-#define QTD_MISSED           (1 << 2)
-#define QTD_SPLIT            (1 << 1)
-#define QTD_PING             (1 << 0)
-#define QTD_IOC              (1 << 15)
-#define QTD_CERR_SHIFT       10
-#define QTD_CERR_MASK        (3 << 10)
+#define QTD_PID_OUT     (0 << 8)    // 0x0000
+#define QTD_PID_IN      (1 << 8)    // 0x0100
+#define QTD_PID_SETUP   (2 << 8)    // 0x0200
+
+// Статусные биты
+#define QTD_ACTIVE      (1 << 7)    // 0x0080
+#define QTD_HALTED      (1 << 6)    // 0x0040
+#define QTD_DATABUFF_ERR (1 << 5)   // 0x0020
+#define QTD_BABBLE      (1 << 4)    // 0x0010
+#define QTD_XACT_ERR    (1 << 3)    // 0x0008
+#define QTD_MISSED      (1 << 2)    // 0x0004
+#define QTD_SPLIT       (1 << 1)    // 0x0002
+#define QTD_PING        (1 << 0)    // 0x0001
+
+// Длина и IOC
+#define QTD_LENGTH(n)   ((n) << 16)  // bits 16-31
+#define QTD_IOC         (1 << 15)    // Interrupt on complete (bit 15)
+#define QTD_CERR(n)     ((n) << 10)  // Error counter (bits 10-11)
 
 // ==================== STRUCTURES ====================
 
@@ -563,6 +567,7 @@ void ehci_irq_handler(void) {
 
 // ==================== USB CORE CALLBACKS ====================
 
+// ehci_control_transfer - АСИНХРОННЫЙ контрольный трансфер
 static int ehci_control_transfer(usb_device_t* dev, uint8_t bmRequestType,
                                  uint8_t bRequest, uint16_t wValue,
                                  uint16_t wIndex, uint16_t wLength,
@@ -570,11 +575,194 @@ static int ehci_control_transfer(usb_device_t* dev, uint8_t bmRequestType,
     ehci_controller_t* ctrl = (ehci_controller_t*)dev->controller_data;
     if (!ctrl || !ctrl->initialized) return -1;
     
-    term_printf(term, "[EHCI] Control transfer to dev %d, req=0x%02X, len=%d\n",
-                dev->address, bRequest, wLength);
+    term_printf(term, "[EHCI] Control: req=0x%02X, len=%d\n", bRequest, wLength);
     
-    // TODO: Implement actual control transfer
-    return 0;
+    // 1. Выделяем qTD для SETUP стадии
+    ehci_qtd_t* setup_qtd = ehci_alloc_dma(ctrl);
+    if (!setup_qtd) return -1;
+    memset(setup_qtd, 0, sizeof(ehci_qtd_t));
+    
+    // Формируем SETUP пакет (8 байт)
+    uint8_t* setup_buf = (uint8_t*)ehci_alloc_dma(ctrl);
+    if (!setup_buf) {
+        ehci_free_dma(ctrl, setup_qtd);
+        return -1;
+    }
+    
+    setup_buf[0] = bmRequestType;
+    setup_buf[1] = bRequest;
+    setup_buf[2] = wValue & 0xFF;
+    setup_buf[3] = (wValue >> 8) & 0xFF;
+    setup_buf[4] = wIndex & 0xFF;
+    setup_buf[5] = (wIndex >> 8) & 0xFF;
+    setup_buf[6] = wLength & 0xFF;
+    setup_buf[7] = (wLength >> 8) & 0xFF;
+    
+    // Настраиваем SETUP qTD
+    setup_qtd->next_qtd = EHCI_LINK_TERMINATE;
+    setup_qtd->alt_next_qtd = EHCI_LINK_TERMINATE;
+    setup_qtd->token = QTD_ACTIVE | QTD_PID_SETUP | QTD_LENGTH(8);
+    setup_qtd->buffer[0] = (uint32_t)(uintptr_t)setup_buf;
+    
+    uint32_t setup_phys = (uint32_t)(uintptr_t)setup_qtd;
+    
+    // 2. DATA стадия (если есть данные)
+    ehci_qtd_t* data_qtd = NULL;
+    uint32_t data_phys = 0;
+    void* data_buf = NULL;
+    
+    if (wLength > 0 && data) {
+        data_qtd = ehci_alloc_dma(ctrl);
+        if (!data_qtd) {
+            ehci_free_dma(ctrl, setup_qtd);
+            ehci_free_dma(ctrl, setup_buf);
+            return -1;
+        }
+        memset(data_qtd, 0, sizeof(ehci_qtd_t));
+        
+        // Копируем данные в DMA-буфер
+        data_buf = ehci_alloc_dma(ctrl);
+        if (!data_buf) {
+            ehci_free_dma(ctrl, setup_qtd);
+            ehci_free_dma(ctrl, setup_buf);
+            ehci_free_dma(ctrl, data_qtd);
+            return -1;
+        }
+        
+        memcpy(data_buf, data, wLength);
+        
+        uint32_t pid;
+		if (bmRequestType & 0x80) {
+    		pid = QTD_PID_IN;
+		} else {
+		    pid = QTD_PID_OUT;
+		}
+        
+        data_qtd->next_qtd = EHCI_LINK_TERMINATE;
+        data_qtd->alt_next_qtd = EHCI_LINK_TERMINATE;
+        data_qtd->token = QTD_ACTIVE | pid | QTD_LENGTH(wLength);
+        data_qtd->buffer[0] = (uint32_t)(uintptr_t)data_buf;
+        
+        data_phys = (uint32_t)(uintptr_t)data_qtd;
+        
+        // Связываем: SETUP -> DATA
+        setup_qtd->next_qtd = data_phys;
+    }
+    
+    // 3. STATUS стадия
+    ehci_qtd_t* status_qtd = ehci_alloc_dma(ctrl);
+    if (!status_qtd) {
+        ehci_free_dma(ctrl, setup_qtd);
+        ehci_free_dma(ctrl, setup_buf);
+        if (data_qtd) ehci_free_dma(ctrl, data_qtd);
+        if (data_buf) ehci_free_dma(ctrl, data_buf);
+        return -1;
+    }
+    memset(status_qtd, 0, sizeof(ehci_qtd_t));
+    
+    uint8_t status_pid = (bmRequestType & 0x80) ? QTD_PID_OUT : QTD_PID_IN;
+    status_qtd->next_qtd = EHCI_LINK_TERMINATE;
+    status_qtd->alt_next_qtd = EHCI_LINK_TERMINATE;
+    status_qtd->token = QTD_ACTIVE | status_pid | QTD_LENGTH(0) | QTD_IOC;
+    
+    uint32_t status_phys = (uint32_t)(uintptr_t)status_qtd;
+    
+    // Связываем последний qTD со STATUS
+    if (data_qtd) {
+        data_qtd->next_qtd = status_phys;
+    } else {
+        setup_qtd->next_qtd = status_phys;
+    }
+    
+    // 4. Подвешиваем к ASYNC списку
+    // Сохраняем старый указатель
+    uint32_t old_next = ctrl->async_qh->horiz_link;
+    
+    // Создаём временный QH для этого трансфера
+    ehci_qh_t* temp_qh = ehci_alloc_dma(ctrl);
+    if (!temp_qh) {
+        // clean up
+        return -1;
+    }
+    memset(temp_qh, 0, sizeof(ehci_qh_t));
+    
+    temp_qh->horiz_link = old_next;  // Включаем в цепочку
+    temp_qh->ep_char = (dev->device_desc.bMaxPacketSize0 << 16) | (dev->address << 8) | (0 << 15) | (2 << 12);
+    temp_qh->next_qtd = setup_phys;
+    temp_qh->alt_next_qtd = EHCI_LINK_TERMINATE;
+    temp_qh->token = QTD_HALTED;
+    
+    // Вставляем в начало async списка
+    ctrl->async_qh->horiz_link = (uint32_t)(uintptr_t)temp_qh | EHCI_LINK_TYPE_QH;
+    
+    // Активируем async schedule если надо
+    uint32_t cmd = ehci_read_op(ctrl, EHCI_USBCMD);
+    if (!(cmd & EHCI_CMD_ASENABLE)) {
+        ehci_write_op(ctrl, EHCI_USBCMD, cmd | EHCI_CMD_ASENABLE);
+    }
+    
+    // 5. Ждём завершения (polling режим)
+    uint32_t timeout = timeout_ms * 1000;
+    while (timeout--) {
+        uint32_t token = status_qtd->token;
+        if (!(token & QTD_ACTIVE)) {
+            // Завершилось
+            if (token & QTD_HALTED) {
+                // Ошибка
+                term_printf(term, "[EHCI] Control transfer failed: token=0x%08X\n", token);
+                
+                // Восстанавливаем
+                ctrl->async_qh->horiz_link = old_next;
+                
+                // Clean up
+                ehci_free_dma(ctrl, temp_qh);
+                ehci_free_dma(ctrl, setup_qtd);
+                ehci_free_dma(ctrl, setup_buf);
+                if (data_qtd) ehci_free_dma(ctrl, data_qtd);
+                if (data_buf) ehci_free_dma(ctrl, data_buf);
+                ehci_free_dma(ctrl, status_qtd);
+                
+                return -1;
+            }
+            
+            // Успех - копируем данные обратно если нужно
+            if (data && wLength > 0 && (bmRequestType & 0x80)) {
+                memcpy(data, data_buf, wLength);
+            }
+            
+            // Восстанавливаем
+            ctrl->async_qh->horiz_link = old_next;
+            
+            // Clean up
+            ehci_free_dma(ctrl, temp_qh);
+            ehci_free_dma(ctrl, setup_qtd);
+            ehci_free_dma(ctrl, setup_buf);
+            if (data_qtd) ehci_free_dma(ctrl, data_qtd);
+            if (data_buf) ehci_free_dma(ctrl, data_buf);
+            ehci_free_dma(ctrl, status_qtd);
+            
+            return wLength;
+        }
+        
+        // Небольшая задержка
+        for (volatile int i = 0; i < 10; i++);
+    }
+    
+    // Timeout
+    term_printf(term, "[EHCI] Control transfer timeout\n");
+    
+    // Восстанавливаем
+    ctrl->async_qh->horiz_link = old_next;
+    
+    // Clean up
+    ehci_free_dma(ctrl, temp_qh);
+    ehci_free_dma(ctrl, setup_qtd);
+    ehci_free_dma(ctrl, setup_buf);
+    if (data_qtd) ehci_free_dma(ctrl, data_qtd);
+    if (data_buf) ehci_free_dma(ctrl, data_buf);
+    ehci_free_dma(ctrl, status_qtd);
+    
+    return -1;
 }
 
 static int ehci_bulk_transfer(usb_device_t* dev, uint8_t endpoint,
@@ -582,8 +770,101 @@ static int ehci_bulk_transfer(usb_device_t* dev, uint8_t endpoint,
     ehci_controller_t* ctrl = (ehci_controller_t*)dev->controller_data;
     if (!ctrl || !ctrl->initialized) return -1;
     
-    term_printf(term, "[EHCI] Bulk transfer EP 0x%02X, len=%d\n", endpoint, length);
-    return 0;
+    // Определяем направление
+    uint32_t dir;
+	if (endpoint & 0x80) {
+	    dir = QTD_PID_IN;
+	} else {
+	    dir = QTD_PID_OUT;
+	}
+    uint8_t ep_num = endpoint & 0x7F;
+    
+    // Выделяем qTD
+    ehci_qtd_t* qtd = ehci_alloc_dma(ctrl);
+    if (!qtd) return -1;
+    memset(qtd, 0, sizeof(ehci_qtd_t));
+    
+    // Выделяем DMA-буфер
+    void* dma_buf = ehci_alloc_dma(ctrl);
+    if (!dma_buf) {
+        ehci_free_dma(ctrl, qtd);
+        return -1;
+    }
+    
+    // Копируем данные
+    if (dir == QTD_PID_OUT) {
+        memcpy(dma_buf, data, length);
+    }
+    
+    // Настраиваем qTD
+    qtd->next_qtd = EHCI_LINK_TERMINATE;
+    qtd->alt_next_qtd = EHCI_LINK_TERMINATE;
+    qtd->token = QTD_ACTIVE | dir | QTD_LENGTH(length) | QTD_IOC;
+    qtd->buffer[0] = (uint32_t)(uintptr_t)dma_buf;
+    
+    uint32_t qtd_phys = (uint32_t)(uintptr_t)qtd;
+    
+    // Создаём QH для этого эндпоинта
+    ehci_qh_t* qh = ehci_alloc_dma(ctrl);
+    if (!qh) {
+        ehci_free_dma(ctrl, qtd);
+        ehci_free_dma(ctrl, dma_buf);
+        return -1;
+    }
+    memset(qh, 0, sizeof(ehci_qh_t));
+    
+    // Настраиваем QH (max packet обычно 512 для bulk high-speed)
+    uint32_t max_packet = 512;
+    qh->horiz_link = ctrl->async_qh->horiz_link;
+    qh->ep_char = (max_packet << 16) | 
+                  (dev->address << 8) | 
+                  (ep_num << 8) |
+                  (0 << 15) |           // Head of list
+                  (2 << 12);             // High speed
+    qh->next_qtd = qtd_phys;
+    qh->alt_next_qtd = EHCI_LINK_TERMINATE;
+    qh->token = QTD_HALTED;
+    
+    // Вставляем в async список
+    uint32_t old_next = ctrl->async_qh->horiz_link;
+    ctrl->async_qh->horiz_link = (uint32_t)(uintptr_t)qh | EHCI_LINK_TYPE_QH;
+    
+    // Ждём завершения
+    uint32_t timeout = timeout_ms * 1000;
+    while (timeout--) {
+        uint32_t token = qtd->token;
+        if (!(token & QTD_ACTIVE)) {
+            if (token & QTD_HALTED) {
+                term_printf(term, "[EHCI] Bulk transfer failed\n");
+                ctrl->async_qh->horiz_link = old_next;
+                ehci_free_dma(ctrl, qh);
+                ehci_free_dma(ctrl, qtd);
+                if (dir == QTD_PID_IN) {
+                    memcpy(data, dma_buf, length);
+                }
+                ehci_free_dma(ctrl, dma_buf);
+                return -1;
+            }
+            
+            // Успех
+            ctrl->async_qh->horiz_link = old_next;
+            if (dir == QTD_PID_IN) {
+                memcpy(data, dma_buf, length);
+            }
+            ehci_free_dma(ctrl, qh);
+            ehci_free_dma(ctrl, qtd);
+            ehci_free_dma(ctrl, dma_buf);
+            return length;
+        }
+        for (volatile int i = 0; i < 10; i++);
+    }
+    
+    // Timeout
+    ctrl->async_qh->horiz_link = old_next;
+    ehci_free_dma(ctrl, qh);
+    ehci_free_dma(ctrl, qtd);
+    ehci_free_dma(ctrl, dma_buf);
+    return -1;
 }
 
 static int ehci_interrupt_transfer(usb_device_t* dev, uint8_t endpoint,

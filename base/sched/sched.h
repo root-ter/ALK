@@ -27,6 +27,7 @@ typedef struct task
     void *user_mem;       // указатель на .user память
     size_t user_mem_size; // размер .user памяти
     char *name;
+    uint64_t *page_table;
 } task_t;
 
 typedef struct task_info

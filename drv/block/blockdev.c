@@ -414,17 +414,18 @@ void blockdev_scan_all_disks(void) {
     int disk_counter = 1;
     char dev_name[BLOCKDEV_NAME_LEN];
     
-    // 1. IDE диски (уже есть)
+    // 1. IDE диски
     term_printf(term, "  Scanning IDE controllers...\n");
     for (int ch = 0; ch < 2; ch++) {
         for (int dr = 0; dr < 2; dr++) {
             int idx = ch * 2 + dr;
             if (disks[idx].type != IDE_TYPE_NONE) {
-                snprintf(dev_name, sizeof(dev_name), "dsk_%d", disk_counter++);
+                snprintf(dev_name, sizeof(dev_name), "ide_%d", disk_counter++);
                 blockdev_register_ide(&disks[idx], dev_name, ch, dr);
             }
         }
     }
+    
     
     term_printf(term, "\n[BLOCKDEV] Scan complete. Found %d devices.\n", 
                 blockdev_count);

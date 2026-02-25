@@ -261,29 +261,54 @@ static void cmd_disklist(void) {
 
 static void cmd_diskinfo(char* args) {
     if (!args || args[0] == '\0') {
-        term_printf(term, "Usage: diskinfo <disk_name or disk_number>\n");
+        term_printf(term, "Usage: diskinfo <disk_name>\n");
         term_printf(term, "Example: diskinfo dsk_1\n");
         return;
     }
     
-    blockdev_t* dev = NULL;
+    // Убираем пробелы
+    while (*args == ' ') args++;
     
-    // Проверяем, является ли аргумент числом
-    if (args[0] >= '0' && args[0] <= '9') {
-        int num = atoi(args);
-        dev = blockdev_find_by_number(num);
-    } else {
-        dev = blockdev_find(args);
-    }
+    term_printf(term, "Looking for device: '%s'\n", args);
     
+    blockdev_t* dev = blockdev_find(args);
     if (!dev) {
-        term_printf(term, "Device '%s' not found\n", args);
+        term_printf(term, "Device '%s' not found!\n", args);
+        term_printf(term, "Available devices:\n");
+        
+        blockdev_t* list[16];
+        int count = blockdev_get_list(list, 16);
+        for (int i = 0; i < count; i++) {
+            term_printf(term, "  %s\n", list[i]->name);
+        }
         return;
     }
     
-    char info[512];
-    blockdev_get_info(dev, info, sizeof(info));
-    term_printf(term, "%s\n", info);
+    // Проверяем, что устройство готово
+    if (dev->status != BLOCKDEV_READY) {
+        term_printf(term, "Device '%s' is not ready (status: %d)\n", 
+                    args, dev->status);
+        return;
+    }
+    
+    // БЕЗОПАСНО выводим информацию
+    term_printf(term, "\n=== Device: %s ===\n", dev->name);
+    term_printf(term, "Type: %d\n", dev->type);
+    term_printf(term, "Status: %d\n", dev->status);
+    term_printf(term, "Sector size: %lu bytes\n", (unsigned long)dev->sector_size);
+    term_printf(term, "Total sectors: %lu\n", (unsigned long)dev->total_sectors);
+    term_printf(term, "Total size: %lu MB\n", 
+                (unsigned long)(dev->total_bytes / (1024 * 1024)));
+    term_printf(term, "LBA48: %s\n", dev->supports_lba48 ? "Yes" : "No");
+    
+    // Если есть read/write функции - проверяем что они не NULL
+    term_printf(term, "Read handler: %s\n", dev->read_sectors ? "OK" : "MISSING!");
+    term_printf(term, "Write handler: %s\n", dev->write_sectors ? "OK" : "MISSING!");
+    
+    // Статистика
+    term_printf(term, "Reads: %lu\n", (unsigned long)dev->read_count);
+    term_printf(term, "Writes: %lu\n", (unsigned long)dev->write_count);
+    term_printf(term, "Errors: %lu\n", (unsigned long)dev->error_count);
 }
 
 static void cmd_diskread(char* args) {

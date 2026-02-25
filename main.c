@@ -22,6 +22,7 @@
 #include "drv/usb/usbdev/usbdev.h"
 #include "drv/usb/ehci/ehci.h"
 #include "base/mem/pmm.h"
+#include "base/mem/paging.h"
 
 /* символы из link.ld */
 extern char _heap_start;
@@ -82,6 +83,9 @@ void kmain(uint64_t mb2_addr)
     
     size_t heap_size = (size_t)((uintptr_t)&_heap_end - (uintptr_t)&_heap_start);
     malloc_init(&_heap_start, heap_size);
+    
+    uint64_t total_ram = get_total_memory();
+    paging_init(total_ram);
 
     uint32_t cols = (fb.width - 40) / (FONT_WIDTH + 1);
     uint32_t rows = (fb.height - 40) / (FONT_HEIGHT + 2);
