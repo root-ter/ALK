@@ -383,7 +383,7 @@ void cmd_alk(void) {
     term_printf(term, " /  /  |  |  |___|  |\\ \\   | \\/ | __| |\n");
     term_printf(term, "/__/   |__|______|__| \\_\\  \\____/|____|\n");
     term_printf(term, "\n");
-    term_printf(term, "ALK OS v0.02\n");
+    term_printf(term, "ALK OS v0.03\n");
     term_printf(term, "Shell:\n");
     term_printf(term, "  ALKShell\n");
     term_printf(term, "\nWe hope you have a good experience by using ALK :)\n");
