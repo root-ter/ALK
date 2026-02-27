@@ -5,6 +5,7 @@
 #include <stdarg.h>
 #include "../../libc/string.h"
 #include "../../base/math.h"
+#include "../../base/mem/mem.h"
 
 // Вспомогательная функция для вычисления сдвигов масок
 static void calculate_rgb_shifts(framebuffer_t* fb) {
@@ -97,9 +98,42 @@ bool fb_init(framebuffer_t* fb) {
     fb->fg_color = COLOR_WHITE;
     fb->bg_color = COLOR_BLACK;
     fb->tab_size = 4;
+
+    fb->back_buffer = NULL;
+    fb->back_buffer_size = 0;
+    fb->vsync_enabled = false;
+    fb->back_buffer_allocated = false;
+    fb->frame_counter = 0;
+    fb->target_fps = 60;
     
     // Очищаем экран
     fb_clear(fb, fb->bg_color);
+    
+    return true;
+}
+
+bool fb_alloc_backbuffer(framebuffer_t* fb) {
+    if (!fb) return false;
+    
+    // Если уже выделен — ничего не делаем
+    if (fb->back_buffer_allocated && fb->back_buffer) {
+        return true;
+    }
+    
+    // Вычисляем размер
+    fb->back_buffer_size = fb->height * fb->pitch;
+    
+    // Пробуем выделить через malloc (теперь он уже есть)
+    fb->back_buffer = (uint8_t*)malloc(fb->back_buffer_size);
+    if (!fb->back_buffer) {
+        return false;
+    }
+    
+    // Копируем текущее содержимое экрана
+    memcpy(fb->back_buffer, fb->buffer, fb->back_buffer_size);
+    
+    fb->back_buffer_allocated = true;
+    fb->vsync_enabled = true;
     
     return true;
 }
@@ -140,26 +174,30 @@ void fb_clear(framebuffer_t* fb, color_t color) {
 
 // Установка пикселя
 void fb_set_pixel(framebuffer_t* fb, uint32_t x, uint32_t y, color_t color) {
-    if (x >= fb->width || y >= fb->height) {
-        return;
+    if (x >= fb->width || y >= fb->height) return;
+    
+    // Выбираем целевой буфер
+    uint8_t* target;
+    if (fb->vsync_enabled && fb->back_buffer) {
+        target = fb->back_buffer;
+    } else {
+        target = fb->buffer;
     }
     
-    uint32_t pixel = fb_rgb_to_pixel(fb, color);
     uintptr_t offset = y * fb->pitch + x * fb->pixel_size;
     
     if (fb->bpp == 32) {
-        *((uint32_t*)(fb->buffer + offset)) = pixel;
+        *((uint32_t*)(target + offset)) = rgb_to_pixel_32bit(fb, color.r, color.g, color.b);
     } else if (fb->bpp == 24) {
-        uint8_t* pixel_ptr = fb->buffer + offset;
+        uint8_t* pixel_ptr = target + offset;
         pixel_ptr[0] = color.b;
         pixel_ptr[1] = color.g;
         pixel_ptr[2] = color.r;
     } else if (fb->bpp == 16) {
-        *((uint16_t*)(fb->buffer + offset)) = (uint16_t)pixel;
+        *((uint16_t*)(target + offset)) = (uint16_t)rgb_to_pixel_16bit(fb, color.r, color.g, color.b);
     } else if (fb->bpp == 8) {
-        // Для 8-битного используем градации серого
         uint8_t gray = (color.r * 30 + color.g * 59 + color.b * 11) / 100;
-        *((uint8_t*)(fb->buffer + offset)) = gray;
+        *((uint8_t*)(target + offset)) = gray;
     }
 }
 
@@ -604,5 +642,55 @@ void fb_newline(framebuffer_t* fb) {
     
     if (fb->cursor_y + FONT_HEIGHT >= fb->height) {
         fb_scroll(fb, FONT_HEIGHT + FONT_SPACING);
+    }
+}
+
+void fb_swap_buffers(framebuffer_t* fb) {
+    if (!fb->vsync_enabled || !fb->back_buffer) return;
+    
+    // Одним махом копируем весь буфер
+    memcpy(fb->buffer, fb->back_buffer, fb->back_buffer_size);
+}
+
+// Включить VSync с указанным FPS
+void fb_enable_vsync(framebuffer_t* fb, uint32_t fps) {
+    if (!fb->back_buffer) return;
+    
+    fb->vsync_enabled = true;
+    fb->target_fps = (fps > 0) ? fps : 60;
+    fb->frame_counter = 0;
+    
+    // Сразу копируем текущий back buffer на экран
+    fb_swap_buffers(fb);
+}
+
+// Отключить VSync
+void fb_disable_vsync(framebuffer_t* fb) {
+    fb->vsync_enabled = false;
+    
+    // Копируем последнее состояние на экран
+    if (fb->back_buffer) {
+        memcpy(fb->buffer, fb->back_buffer, fb->back_buffer_size);
+    }
+}
+
+void fb_copy_region(framebuffer_t* fb, uint32_t x, uint32_t y, 
+                    uint32_t width, uint32_t height) {
+    if (!fb->vsync_enabled || !fb->back_buffer) return;
+    
+    // Проверяем границы
+    if (x >= fb->width || y >= fb->height) return;
+    if (x + width > fb->width) width = fb->width - x;
+    if (y + height > fb->height) height = fb->height - y;
+    if (width == 0 || height == 0) return;
+    
+    // Копируем только прямоугольник из back buffer в видеопамять
+    uint8_t* src = fb->back_buffer + y * fb->pitch + x * fb->pixel_size;
+    uint8_t* dst = fb->buffer + y * fb->pitch + x * fb->pixel_size;
+    
+    for (uint32_t row = 0; row < height; row++) {
+        memcpy(dst, src, width * fb->pixel_size);
+        src += fb->pitch;
+        dst += fb->pitch;
     }
 }

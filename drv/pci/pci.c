@@ -1,6 +1,7 @@
 #include "pci.h"
 #include "../io/io.h"
 #include "../../base/mem/mem.h"
+#include "../../base/term/tio.h"
 #include "../../base/term/term.h"
 #include "../../libc/string.h"
 
@@ -440,8 +441,10 @@ const char* pci_class_name(uint8_t class_code, uint8_t subclass) {
 // Вывод информации об устройстве
 void pci_print(term_t* term, pci_device_t* dev) {
     if (!dev) return;
+
+    (void)term;
     
-    term_printf(term, "PCI %02X:%02X.%X: %04X:%04X [%02X:%02X] %s - %s\n",
+    tio_printf("PCI %02X:%02X.%X: %04X:%04X [%02X:%02X] %s - %s\n",
            dev->bus, dev->slot, dev->function,
            dev->vendor_id, dev->device_id,
            dev->class_code, dev->subclass,
@@ -449,7 +452,7 @@ void pci_print(term_t* term, pci_device_t* dev) {
            pci_class_name(dev->class_code, dev->subclass));
     
     if (dev->is_pcie) {
-        term_printf(term, "  PCIe %s, Gen%d x%d\n",
+        tio_printf("  PCIe %s, Gen%d x%d\n",
                pcie_type_name(dev),
                dev->link_speed,
                dev->link_width);

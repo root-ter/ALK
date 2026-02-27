@@ -7,6 +7,7 @@
 #include "../../../libc/string.h"
 #include "../../../base/int/idt.h"
 #include "../../pic/pic.h"
+#include "../../../base/term/tio.h"
 
 // ==================== EHCI REGISTERS ====================
 
@@ -190,7 +191,6 @@ typedef struct {
 } ehci_controller_t;
 
 static ehci_controller_t g_ehci;
-extern term_t* term;
 
 // ==================== LOW-LEVEL FUNCTIONS ====================
 
@@ -219,7 +219,7 @@ static void* ehci_alloc_dma(ehci_controller_t* ctrl) {
     
     uint64_t addr = (uint64_t)phys;
     if (addr > 0xFFFFFFFF) {
-        term_printf(term, "[EHCI] ERROR: DMA >4GB\n");
+        tio_printf("[EHCI] ERROR: DMA >4GB\n");
         pmm_free_page(ctrl->pmm, phys);
         return NULL;
     }
@@ -262,25 +262,25 @@ static void ehci_free_dma(ehci_controller_t* ctrl, void* ptr) {
 // ==================== CONTROLLER INIT ====================
 
 static bool ehci_find_controller(ehci_controller_t* ctrl) {
-    term_printf(term, "[EHCI] Scanning for controller...\n");
+    tio_printf("[EHCI] Scanning for controller...\n");
     
     // Find USB 2.0 controller (class=0x0C, subclass=0x03)
     pci_device_t* pci = pci_find_class(0x0C, 0x03);
     if (!pci) {
-        term_printf(term, "[EHCI] No controller found\n");
+        tio_printf("[EHCI] No controller found\n");
         return false;
     }
     
     // Check if it's EHCI (ProgIF=0x20)
     if (pci->prog_if != 0x20) {
-        term_printf(term, "[EHCI] Not EHCI (ProgIF=0x%02X)\n", pci->prog_if);
+        tio_printf("[EHCI] Not EHCI (ProgIF=0x%02X)\n", pci->prog_if);
         free(pci);
         return false;
     }
     
-    term_printf(term, "[EHCI] Found at %02X:%02X.%X\n", 
+    tio_printf("[EHCI] Found at %02X:%02X.%X\n", 
                 pci->bus, pci->slot, pci->function);
-    term_printf(term, "[EHCI] VID=0x%04X, DID=0x%04X\n", 
+    tio_printf("[EHCI] VID=0x%04X, DID=0x%04X\n", 
                 pci->vendor_id, pci->device_id);
     
     // Enable device
@@ -290,7 +290,7 @@ static bool ehci_find_controller(ehci_controller_t* ctrl) {
     // Get BAR0
     uint64_t bar = pci->bars[0] & ~0xF;
     if (!bar) {
-        term_printf(term, "[EHCI] No BAR0\n");
+        tio_printf("[EHCI] No BAR0\n");
         free(pci);
         return false;
     }
@@ -309,16 +309,16 @@ static bool ehci_find_controller(ehci_controller_t* ctrl) {
     
     ctrl->irq = pci->interrupt_line;
     
-    term_printf(term, "[EHCI] MMIO: 0x%llx, Ports: %d, IRQ: %d\n", 
+    tio_printf("[EHCI] MMIO: 0x%lx, Ports: %d, IRQ: %d\n", 
                 bar, ctrl->num_ports, ctrl->irq);
-    term_printf(term, "[EHCI] 64-bit: %s\n", ctrl->has_64bit ? "Yes" : "No");
+    tio_printf("[EHCI] 64-bit: %s\n", ctrl->has_64bit ? "Yes" : "No");
     
     free(pci);
     return true;
 }
 
 static bool ehci_reset(ehci_controller_t* ctrl) {
-    term_printf(term, "[EHCI] Resetting...\n");
+    tio_printf("[EHCI] Resetting...\n");
     
     // Stop controller
     ehci_write_op(ctrl, EHCI_USBCMD, 0);
@@ -343,22 +343,22 @@ static bool ehci_reset(ehci_controller_t* ctrl) {
     // Clear status
     ehci_write_op(ctrl, EHCI_USBSTS, 0x3F);
     
-    term_printf(term, "[EHCI] Reset complete\n");
+    tio_printf("[EHCI] Reset complete\n");
     return true;
 }
 
 static bool ehci_start(ehci_controller_t* ctrl) {
-    term_printf(term, "[EHCI] Starting...\n");
+    tio_printf("[EHCI] Starting...\n");
     
     // 1. Allocate frame list
     ctrl->frame_list = (uint32_t*)ehci_alloc_dma(ctrl);
     if (!ctrl->frame_list) {
-        term_printf(term, "[EHCI] Failed to allocate frame list\n");
+        tio_printf("[EHCI] Failed to allocate frame list\n");
         return false;
     }
     
     ctrl->frame_list_phys = (uint32_t)(uintptr_t)ctrl->frame_list;
-    term_printf(term, "[EHCI] Frame list at 0x%08X\n", ctrl->frame_list_phys);
+    tio_printf("[EHCI] Frame list at 0x%08X\n", ctrl->frame_list_phys);
     
     // Initialize frame list with terminators
     for (int i = 0; i < 1024; i++) {
@@ -373,7 +373,7 @@ static bool ehci_start(ehci_controller_t* ctrl) {
     }
     
     ctrl->async_qh_phys = (uint32_t)(uintptr_t)ctrl->async_qh;
-    term_printf(term, "[EHCI] Async QH at 0x%08X\n", ctrl->async_qh_phys);
+    tio_printf("[EHCI] Async QH at 0x%08X\n", ctrl->async_qh_phys);
     
     // Initialize async QH
     memset(ctrl->async_qh, 0, sizeof(ehci_qh_t));
@@ -411,7 +411,7 @@ static bool ehci_start(ehci_controller_t* ctrl) {
     ehci_write_op(ctrl, EHCI_ASYNCLISTADDR, ctrl->async_qh_phys);
     
     uint32_t async_check = ehci_read_op(ctrl, EHCI_ASYNCLISTADDR);
-    term_printf(term, "[EHCI] ASYNCLISTADDR=0x%08X\n", async_check);
+    tio_printf("[EHCI] ASYNCLISTADDR=0x%08X\n", async_check);
     
     // 4. Start controller
     uint32_t cmd = EHCI_CMD_RUN | 
@@ -420,19 +420,19 @@ static bool ehci_start(ehci_controller_t* ctrl) {
                    EHCI_CMD_FLSIZE_1024;
     
     ehci_write_op(ctrl, EHCI_USBCMD, cmd);
-    term_printf(term, "[EHCI] USB_CMD=0x%08X\n", cmd);
+    tio_printf("[EHCI] USB_CMD=0x%08X\n", cmd);
     
     // 5. Wait for start
     for (int i = 0; i < 100; i++) {
         uint32_t sts = ehci_read_op(ctrl, EHCI_USBSTS);
         
         if (!(sts & EHCI_STS_HALTED)) {
-            term_printf(term, "[EHCI] Started at iteration %d\n", i);
+            tio_printf("[EHCI] Started at iteration %d\n", i);
             
             if (sts & EHCI_STS_ASYNC)
-                term_printf(term, "[EHCI] Async list active\n");
+                tio_printf("[EHCI] Async list active\n");
             if (sts & EHCI_STS_PERIODIC)
-                term_printf(term, "[EHCI] Periodic list active\n");
+                tio_printf("[EHCI] Periodic list active\n");
             
             ctrl->initialized = true;
             return true;
@@ -442,7 +442,7 @@ static bool ehci_start(ehci_controller_t* ctrl) {
     }
     
     uint32_t sts = ehci_read_op(ctrl, EHCI_USBSTS);
-    term_printf(term, "[EHCI] Failed to start, STS=0x%08X\n", sts);
+    tio_printf("[EHCI] Failed to start, STS=0x%08X\n", sts);
     return false;
 }
 
@@ -459,7 +459,7 @@ static uint8_t ehci_speed_to_usb(uint32_t portsc) {
 }
 
 static void ehci_port_reset(ehci_controller_t* ctrl, int port) {
-    term_printf(term, "[EHCI] Resetting port %d...\n", port);
+    tio_printf("[EHCI] Resetting port %d...\n", port);
     
     uint32_t portsc = ehci_read_op(ctrl, EHCI_PORTSC + port * 4);
     
@@ -492,7 +492,7 @@ static void ehci_handle_port_change(ehci_controller_t* ctrl, int port) {
     if (portsc & EHCI_PORT_CONN) {
         // Device connected
         uint8_t speed = ehci_speed_to_usb(portsc);
-        term_printf(term, "[EHCI] Device connected on port %d (%s speed)\n", 
+        tio_printf("[EHCI] Device connected on port %d (%s speed)\n", 
                     port, speed == USB_SPEED_HIGH ? "High" : 
                            speed == USB_SPEED_FULL ? "Full" : "Low");
         
@@ -507,7 +507,7 @@ static void ehci_handle_port_change(ehci_controller_t* ctrl, int port) {
         }
     } else {
         // Device disconnected
-        term_printf(term, "[EHCI] Device disconnected on port %d\n", port);
+        tio_printf("[EHCI] Device disconnected on port %d\n", port);
         
         // Find and remove device
         // TODO: Implement device removal
@@ -515,7 +515,7 @@ static void ehci_handle_port_change(ehci_controller_t* ctrl, int port) {
 }
 
 static void ehci_scan_ports(ehci_controller_t* ctrl) {
-    term_printf(term, "[EHCI] Scanning ports...\n");
+    tio_printf("[EHCI] Scanning ports...\n");
     
     for (int port = 0; port < ctrl->num_ports; port++) {
         uint32_t portsc = ehci_read_op(ctrl, EHCI_PORTSC + port * 4);
@@ -556,7 +556,7 @@ void ehci_irq_handler(void) {
     
     // Handle errors
     if (sts & EHCI_STS_USBERR) {
-        term_printf(term, "[EHCI] USB error\n");
+        tio_printf("[EHCI] USB error\n");
     }
     
     // Clear status
@@ -575,7 +575,7 @@ static int ehci_control_transfer(usb_device_t* dev, uint8_t bmRequestType,
     ehci_controller_t* ctrl = (ehci_controller_t*)dev->controller_data;
     if (!ctrl || !ctrl->initialized) return -1;
     
-    term_printf(term, "[EHCI] Control: req=0x%02X, len=%d\n", bRequest, wLength);
+    tio_printf("[EHCI] Control: req=0x%02X, len=%d\n", bRequest, wLength);
     
     // 1. Выделяем qTD для SETUP стадии
     ehci_qtd_t* setup_qtd = ehci_alloc_dma(ctrl);
@@ -632,11 +632,11 @@ static int ehci_control_transfer(usb_device_t* dev, uint8_t bmRequestType,
         memcpy(data_buf, data, wLength);
         
         uint32_t pid;
-		if (bmRequestType & 0x80) {
-    		pid = QTD_PID_IN;
-		} else {
-		    pid = QTD_PID_OUT;
-		}
+	if (bmRequestType & 0x80) {
+    	    pid = QTD_PID_IN;
+	} else {
+	    pid = QTD_PID_OUT;
+	}
         
         data_qtd->next_qtd = EHCI_LINK_TERMINATE;
         data_qtd->alt_next_qtd = EHCI_LINK_TERMINATE;
@@ -709,7 +709,7 @@ static int ehci_control_transfer(usb_device_t* dev, uint8_t bmRequestType,
             // Завершилось
             if (token & QTD_HALTED) {
                 // Ошибка
-                term_printf(term, "[EHCI] Control transfer failed: token=0x%08X\n", token);
+                tio_printf("[EHCI] Control transfer failed: token=0x%08X\n", token);
                 
                 // Восстанавливаем
                 ctrl->async_qh->horiz_link = old_next;
@@ -749,7 +749,7 @@ static int ehci_control_transfer(usb_device_t* dev, uint8_t bmRequestType,
     }
     
     // Timeout
-    term_printf(term, "[EHCI] Control transfer timeout\n");
+    tio_printf("[EHCI] Control transfer timeout\n");
     
     // Восстанавливаем
     ctrl->async_qh->horiz_link = old_next;
@@ -835,7 +835,7 @@ static int ehci_bulk_transfer(usb_device_t* dev, uint8_t endpoint,
         uint32_t token = qtd->token;
         if (!(token & QTD_ACTIVE)) {
             if (token & QTD_HALTED) {
-                term_printf(term, "[EHCI] Bulk transfer failed\n");
+                tio_printf("[EHCI] Bulk transfer failed\n");
                 ctrl->async_qh->horiz_link = old_next;
                 ehci_free_dma(ctrl, qh);
                 ehci_free_dma(ctrl, qtd);
@@ -873,7 +873,7 @@ static int ehci_interrupt_transfer(usb_device_t* dev, uint8_t endpoint,
     ehci_controller_t* ctrl = (ehci_controller_t*)dev->controller_data;
     if (!ctrl || !ctrl->initialized) return -1;
     
-    term_printf(term, "[EHCI] Interrupt transfer EP 0x%02X\n", endpoint);
+    tio_printf("[EHCI] Interrupt transfer EP 0x%02X\n", endpoint);
     return 0;
 }
 
@@ -881,12 +881,12 @@ static int ehci_reset_device(usb_device_t* dev) {
     ehci_controller_t* ctrl = (ehci_controller_t*)dev->controller_data;
     if (!ctrl || !ctrl->initialized) return -1;
     
-    term_printf(term, "[EHCI] Reset device %d\n", dev->address);
+    tio_printf("[EHCI] Reset device %d\n", dev->address);
     return 0;
 }
 
 static void ehci_print_info(void) {
-    term_printf(term, "[EHCI] Controller at 0x%llx, %d ports\n",
+    tio_printf("[EHCI] Controller at 0x%lx, %d ports\n",
                 g_ehci.mmio_base, g_ehci.num_ports);
 }
 
@@ -903,7 +903,8 @@ static usb_controller_ops_t ehci_ops = {
 // ==================== INITIALIZATION ====================
 
 bool ehci_init(term_t* term, pmm_t* pmm) {
-    term_printf(term, "\n=== EHCI Driver ===\n");
+    (void)term;
+    tio_printf("\n=== EHCI Driver ===\n");
     
     memset(&g_ehci, 0, sizeof(g_ehci));
     g_ehci.pmm = pmm;
@@ -939,7 +940,7 @@ bool ehci_init(term_t* term, pmm_t* pmm) {
             outb(0xA1, mask);
         }
         
-        term_printf(term, "[EHCI] IRQ %d enabled\n", g_ehci.irq);
+        tio_printf("[EHCI] IRQ %d enabled\n", g_ehci.irq);
     }
     
     // 5. Register with USB core
@@ -949,6 +950,6 @@ bool ehci_init(term_t* term, pmm_t* pmm) {
     // 6. Scan ports
     ehci_scan_ports(&g_ehci);
     
-    term_printf(term, "[EHCI] Initialized successfully\n\n");
+    tio_printf("[EHCI] Initialized successfully\n\n");
     return true;
 }

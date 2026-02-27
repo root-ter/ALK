@@ -1,10 +1,11 @@
 #include "aml.h"
 #include "../../libc/string.h"
-#include "../../base/term/term.h"
+#include "../../base/term/tio.h"
 #include "../../drv/io/io.h"
+#include "../../base/term/term.h"
 
-extern term_t* term;
 static aml_context_t g_aml_ctx;
+extern term_t* term;
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
@@ -241,7 +242,7 @@ void aml_parse_device(aml_context_t *ctx, uint8_t *data, size_t len, size_t *pos
     if (strstr(full_path, "PWRB") || strstr(full_path, "PWRN") || 
         strstr(full_path, "PBTN") || strstr(full_path, "PWRF")) {
         
-        term_printf(term, "[AML] Found power button device: %s\n", full_path);
+        tio_printf("[AML] Found power button device: %s\n", full_path);
         
         ctx->pwr_info.has_pwrb_device = true;
         strncpy(ctx->pwr_info.pwrb_path, full_path, sizeof(ctx->pwr_info.pwrb_path) - 1);
@@ -311,7 +312,7 @@ void aml_parse_scope(aml_context_t *ctx, uint8_t *data, size_t len, size_t *pos)
     
     // Особый интерес представляет Scope(_GPE)
     if (strstr(full_path, "_GPE") || strstr(full_path, "\\_GPE")) {
-        term_printf(term, "[AML] Found GPE scope: %s\n", full_path);
+        tio_printf("[AML] Found GPE scope: %s\n", full_path);
     }
     
     // Заходим в scope
@@ -393,7 +394,7 @@ void aml_parse_method(aml_context_t *ctx, uint8_t *data, size_t len, size_t *pos
             }
         }
         
-        term_printf(term, "[AML] Found GPE method: %s (GPE %d)\n", full_path, gpe_num);
+        tio_printf("[AML] Found GPE method: %s (GPE %d)\n", full_path, gpe_num);
         
         // Ищем внутри метода Notify(PWRB)
         size_t method_body_start = *pos;
@@ -405,7 +406,7 @@ void aml_parse_method(aml_context_t *ctx, uint8_t *data, size_t len, size_t *pos
                 size_t notify_pos = *pos;
                 if (aml_extract_namestring(data, len, &notify_pos, notify_target, sizeof(notify_target)) >= 0) {
                     if (strstr(notify_target, "PWRB") || strstr(notify_target, "PWRN") || strstr(notify_target, "PBTN")) {
-                        term_printf(term, "[AML]   -> Notify(PWRB) found!\n");
+                        tio_printf("[AML]   -> Notify(PWRB) found!\n");
                         
                         // Сохраняем GPE информацию
                         aml_gpe_info_t *gpe = &ctx->gpe_info[ctx->gpe_count];
@@ -504,7 +505,7 @@ void aml_parse_opregion(aml_context_t *ctx, uint8_t *data, size_t len, size_t *p
     
     // Интересует только EC
     if (region_space == AML_REGION_EMBEDDED_CTRL) {
-        term_printf(term, "[AML] Found EC operation region: %s at 0x%llx (len 0x%llx)\n",
+        tio_printf("[AML] Found EC operation region: %s at 0x%lx (len 0x%lx)\n",
                    region_name, region_offset, region_len);
         
         ctx->pwr_info.ec_space_id = region_space;
@@ -584,7 +585,7 @@ void aml_parse_field(aml_context_t *ctx, uint8_t *data, size_t len, size_t *pos)
                     if (strstr(field_entry_name, "PWRB") || strstr(field_entry_name, "PWRN") ||
                         strstr(field_entry_name, "PBTN") || strstr(field_entry_name, "PWRF")) {
                         
-                        term_printf(term, "[AML] Found power button field: %s (bit length: %d)\n",
+                        tio_printf("[AML] Found power button field: %s (bit length: %d)\n",
                                    field_entry_name, field_length);
                         
                         // Пытаемся вычислить offset в байтах
@@ -657,7 +658,7 @@ void aml_walk_tables(aml_context_t *ctx) {
     
     // DSDT
     if (ctx->dsdt_data && ctx->dsdt_len > 64) {
-        term_printf(term, "[AML] Walking DSDT...\n");
+        tio_printf("[AML] Walking DSDT...\n");
         strcpy(ctx->current_scope, "\\");
         aml_walk_scope(ctx, ctx->dsdt_data, ctx->dsdt_len, 0);
     }
@@ -665,7 +666,7 @@ void aml_walk_tables(aml_context_t *ctx) {
     // SSDT
     for (int i = 0; i < ctx->ssdt_count; i++) {
         if (ctx->ssdt_data[i] && ctx->ssdt_len[i] > 64) {
-            term_printf(term, "[AML] Walking SSDT[%d]...\n", i);
+            tio_printf("[AML] Walking SSDT[%d]...\n", i);
             strcpy(ctx->current_scope, "\\");
             aml_walk_scope(ctx, ctx->ssdt_data[i], ctx->ssdt_len[i], 0);
         }
@@ -683,7 +684,7 @@ bool aml_init_context(aml_context_t *ctx, acpi_context_t *acpi_ctx) {
     if (acpi_ctx->dsdt) {
         ctx->dsdt_data = (uint8_t*)acpi_ctx->dsdt;
         ctx->dsdt_len = acpi_ctx->dsdt->header.length;
-        term_printf(term, "[AML] DSDT: 0x%llx, %u bytes\n",
+        tio_printf("[AML] DSDT: 0x%lx, %lu bytes\n",
                    (uint64_t)(uintptr_t)ctx->dsdt_data, ctx->dsdt_len);
     }
     
@@ -694,7 +695,7 @@ bool aml_init_context(aml_context_t *ctx, acpi_context_t *acpi_ctx) {
             ctx->ssdt_len[i] = acpi_ctx->ssdts[i]->header.length;
             ctx->ssdt_count++;
             
-            term_printf(term, "[AML] SSDT[%d]: 0x%llx, %u bytes\n",
+            tio_printf("[AML] SSDT[%d]: 0x%lx, %lu bytes\n",
                        i, (uint64_t)(uintptr_t)ctx->ssdt_data[i], ctx->ssdt_len[i]);
         }
     }
@@ -709,7 +710,7 @@ bool aml_init_context(aml_context_t *ctx, acpi_context_t *acpi_ctx) {
 bool aml_find_power_button(aml_context_t *ctx) {
     if (!ctx || !ctx->initialized) return false;
     
-    term_printf(term, "\n[AML] Searching for power button...\n");
+    tio_printf("\n[AML] Searching for power button...\n");
     
     memset(&ctx->pwr_info, 0, sizeof(power_button_info_t));
     ctx->gpe_count = 0;
@@ -724,7 +725,7 @@ bool aml_find_power_button(aml_context_t *ctx) {
     
     // Если нашли GPE с кнопкой — отлично
     if (ctx->pwr_info.gpe.found) {
-        term_printf(term, "[AML] Power button found via GPE %d\n",
+        tio_printf("[AML] Power button found via GPE %d\n",
                    ctx->pwr_info.gpe.gpe_number);
         ctx->pwr_info.found = true;
         ctx->pwr_info.is_legacy = false;
@@ -733,7 +734,7 @@ bool aml_find_power_button(aml_context_t *ctx) {
     
     // Если нашли PWRB устройство — хорошо
     if (ctx->pwr_info.has_pwrb_device) {
-        term_printf(term, "[AML] Power button found via PWRB device\n");
+        tio_printf("[AML] Power button found via PWRB device\n");
         ctx->pwr_info.found = true;
         ctx->pwr_info.is_legacy = false;
         return true;
@@ -741,14 +742,14 @@ bool aml_find_power_button(aml_context_t *ctx) {
     
     // Если нашли EC field — тоже неплохо
     if (ctx->pwr_info.power_button_offset != 0) {
-        term_printf(term, "[AML] Power button found via EC field at 0x%02X\n",
+        tio_printf("[AML] Power button found via EC field at 0x%02X\n",
                    ctx->pwr_info.power_button_offset);
         ctx->pwr_info.found = true;
         ctx->pwr_info.is_legacy = false;
         return true;
     }
     
-    term_printf(term, "[AML] No power button found, using legacy PM1 method\n");
+    tio_printf("[AML] No power button found, using legacy PM1 method\n");
     return false;
 }
 
@@ -769,61 +770,61 @@ bool aml_get_gpe_info(aml_gpe_info_t *info, int index) {
 void aml_print_info(aml_context_t *ctx) {
     if (!ctx || !term) return;
     
-    term_printf(term, "\n=== AML Parser Information ===\n");
+    tio_printf("\n=== AML Parser Information ===\n");
     
     if (ctx->pwr_info.found) {
-        term_printf(term, "Power button: FOUND\n");
+        tio_printf("Power button: FOUND\n");
         
         if (ctx->pwr_info.gpe.found) {
-            term_printf(term, "  Method: GPE %d (%s)\n",
+            tio_printf("  Method: GPE %d (%s)\n",
                        ctx->pwr_info.gpe.gpe_number,
                        ctx->pwr_info.gpe.gpe_type ? "_E" : "_L");
         }
         
         if (ctx->pwr_info.has_pwrb_device) {
-            term_printf(term, "  Device: %s\n", ctx->pwr_info.pwrb_path);
+            tio_printf("  Device: %s\n", ctx->pwr_info.pwrb_path);
         }
         
         if (ctx->pwr_info.power_button_offset != 0) {
-            term_printf(term, "  EC: offset 0x%02X, bit %d\n",
+            tio_printf("  EC: offset 0x%02X, bit %d\n",
                        ctx->pwr_info.power_button_offset,
                        ctx->pwr_info.power_button_bit);
         }
     } else {
-        term_printf(term, "Power button: NOT FOUND (using legacy)\n");
+        tio_printf("Power button: NOT FOUND (using legacy)\n");
     }
     
-    term_printf(term, "GPE handlers: %d\n", ctx->gpe_count);
+    tio_printf("GPE handlers: %d\n", ctx->gpe_count);
     
     for (int i = 0; i < ctx->gpe_count && i < 5; i++) {
-        term_printf(term, "  GPE[%d]: %s GPE%d\n", i,
+        tio_printf("  GPE[%d]: %s GPE%d\n", i,
                    ctx->gpe_info[i].gpe_type ? "_E" : "_L",
                    ctx->gpe_info[i].gpe_number);
     }
     
-    term_printf(term, "===============================\n\n");
+    tio_printf("===============================\n\n");
 }
 
 void aml_hex_dump(uint8_t *data, size_t len, const char *label) {
     if (!term || !data || len == 0) return;
     
-    term_printf(term, "\n[AML] %s (%u bytes):\n", label, len);
+    tio_printf("\n[AML] %s (%lu bytes):\n", label, len);
     
     size_t limit = (len > 256) ? 256 : len;
     for (size_t i = 0; i < limit; i += 16) {
-        term_printf(term, "  %04X: ", i);
+        tio_printf("  %04lX: ", i);
         
         for (size_t j = 0; j < 16; j++) {
-            if (i + j < len) term_printf(term, "%02X ", data[i + j]);
-            else term_printf(term, "   ");
+            if (i + j < len) tio_printf("%02X ", data[i + j]);
+            else tio_printf("   ");
         }
         
-        term_printf(term, " ");
+        tio_printf(" ");
         for (size_t j = 0; j < 16 && i + j < len; j++) {
             uint8_t c = data[i + j];
-            term_printf(term, "%c", (c >= 32 && c < 127) ? c : '.');
+            tio_printf("%c", (c >= 32 && c < 127) ? c : '.');
         }
         
-        term_printf(term, "\n");
+        tio_printf("\n");
     }
 }

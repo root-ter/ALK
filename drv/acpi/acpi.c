@@ -7,16 +7,17 @@
 #include "../../libc/string.h"
 #include "../../base/mb2/mb2.h"
 #include "../io/io.h"
-#include "../../base/term/term.h"
+#include "../../base/term/tio.h"
 #include "../../base/sched/sched.h"
 #include "aml.h"
+#include "../../base/term/term.h"
 #include <stddef.h>
 
 // Глобальный контекст
 acpi_context_t g_acpi_ctx;
-extern term_t* term;
 static aml_context_t g_aml_ctx;
 static bool aml_initialized = false;
+extern term_t* term;
 
 // ==================== УНИВЕРСАЛЬНЫЙ МОНИТОР КНОПКИ ПИТАНИЯ ====================
 
@@ -59,7 +60,7 @@ static const char* detect_emulator(void) {
 
 // Инициализация монитора
 static bool init_power_monitor(void) {
-    term_printf(term, "[PWRMON] Initializing power button monitor\n");
+    tio_printf("[PWRMON] Initializing power button monitor\n");
     
     // Инициализируем AML парсер
     init_aml_power_detection();
@@ -321,7 +322,7 @@ static void parse_madt(madt_t* madt) {
             case MADT_TYPE_LOCAL_APIC: {
                 madt_local_apic_t* lapic = (madt_local_apic_t*)ptr;
                 if (lapic->flags & 1) { // Processor enabled
-                    term_printf(term, "[ACPI] CPU %d: APIC ID %d\n",
+                    tio_printf("[ACPI] CPU %d: APIC ID %d\n",
                                lapic->processor_id, lapic->apic_id);
                 }
                 break;
@@ -331,7 +332,7 @@ static void parse_madt(madt_t* madt) {
                 madt_io_apic_t* ioapic = (madt_io_apic_t*)ptr;
                 g_acpi_ctx.io_apic_addr = ioapic->io_apic_address;
                 g_acpi_ctx.gsi_base = ioapic->global_system_interrupt_base;
-                term_printf(term, "[ACPI] IOAPIC: ID %d, Addr 0x%x, GSI %d\n",
+                tio_printf("[ACPI] IOAPIC: ID %d, Addr 0x%x, GSI %d\n",
                            ioapic->io_apic_id, ioapic->io_apic_address,
                            ioapic->global_system_interrupt_base);
                 break;
@@ -339,7 +340,7 @@ static void parse_madt(madt_t* madt) {
             
             case MADT_TYPE_INTERRUPT_SOURCE: {
                 madt_interrupt_source_t* isrc = (madt_interrupt_source_t*)ptr;
-                term_printf(term, "[ACPI] IRQ Source: Bus %d, IRQ %d -> GSI %d\n",
+                tio_printf("[ACPI] IRQ Source: Bus %d, IRQ %d -> GSI %d\n",
                            isrc->bus, isrc->source, isrc->interrupt);
                 break;
             }
@@ -369,7 +370,7 @@ static void enable_acpi(fadt_t* fadt) {
                 }
             }
             
-            term_printf(term, "[ACPI] SCI enabled\n");
+            tio_printf("[ACPI] SCI enabled\n");
         }
     }
     
@@ -380,7 +381,7 @@ static void enable_acpi(fadt_t* fadt) {
 
 // Инициализация ACPI
 bool acpi_init(void) {
-    term_printf(term, "[ACPI] Initializing...\n");
+    tio_printf("[ACPI] Initializing...\n");
     
     // Очищаем контекст
     memset(&g_acpi_ctx, 0, sizeof(acpi_context_t));
@@ -388,7 +389,7 @@ bool acpi_init(void) {
     // Получаем RSDP из Multiboot2
     uint64_t rsdp_addr = get_rsdp_address();
     if (!rsdp_addr) {
-        term_printf(term, "[ACPI] RSDP not found via Multiboot2\n");
+        tio_printf("[ACPI] RSDP not found via Multiboot2\n");
         return false;
     }
     
@@ -396,16 +397,16 @@ bool acpi_init(void) {
     
     // Проверяем RSDP
     if (memcmp(g_acpi_ctx.rsdp->signature, "RSD PTR ", 8) != 0) {
-        term_printf(term, "[ACPI] Invalid RSDP signature\n");
+        tio_printf("[ACPI] Invalid RSDP signature\n");
         return false;
     }
     
     if (!acpi_checksum_valid((uint8_t*)g_acpi_ctx.rsdp, 20)) {
-        term_printf(term, "[ACPI] RSDP checksum invalid\n");
+        tio_printf("[ACPI] RSDP checksum invalid\n");
         return false;
     }
     
-    term_printf(term, "[ACPI] RSDP v%d found at 0x%llx\n",
+    tio_printf("[ACPI] RSDP v%d found at 0x%lx\n",
                g_acpi_ctx.rsdp->revision, rsdp_addr);
     
     // Определяем, используем ли XSDT (ACPI 2.0+)
@@ -415,22 +416,22 @@ bool acpi_init(void) {
     // Загружаем RSDT/XSDT
     if (g_acpi_ctx.xsdt_present) {
         g_acpi_ctx.rsdt = (rsdt_t*)(uintptr_t)g_acpi_ctx.rsdp->xsdt_address;
-        term_printf(term, "[ACPI] Using XSDT at 0x%llx\n", 
+        tio_printf("[ACPI] Using XSDT at 0x%lx\n", 
                    g_acpi_ctx.rsdp->xsdt_address);
     } else {
         g_acpi_ctx.rsdt = (rsdt_t*)(uintptr_t)g_acpi_ctx.rsdp->rsdt_address;
-        term_printf(term, "[ACPI] Using RSDT at 0x%x\n",
+        tio_printf("[ACPI] Using RSDT at 0x%x\n",
                    g_acpi_ctx.rsdp->rsdt_address);
     }
     
     if (!g_acpi_ctx.rsdt) {
-        term_printf(term, "[ACPI] No RSDT/XSDT found\n");
+        tio_printf("[ACPI] No RSDT/XSDT found\n");
         return false;
     }
     
     // Проверяем RSDT/XSDT
     if (!acpi_checksum_valid((uint8_t*)g_acpi_ctx.rsdt, g_acpi_ctx.rsdt->header.length)) {
-        term_printf(term, "[ACPI] RSDT/XSDT checksum invalid\n");
+        tio_printf("[ACPI] RSDT/XSDT checksum invalid\n");
         return false;
     }
     
@@ -467,8 +468,8 @@ bool acpi_init(void) {
         enable_acpi(g_acpi_ctx.fadt);
     }
     
-    term_printf(term, "[ACPI] Initialized successfully\n");
-    term_printf(term, "[ACPI] Tables: %s, FADT: %s, MADT: %s, MCFG: %s\n",
+    tio_printf("[ACPI] Initialized successfully\n");
+    tio_printf("[ACPI] Tables: %s, FADT: %s, MADT: %s, MCFG: %s\n",
                g_acpi_ctx.xsdt_present ? "XSDT" : "RSDT",
                g_acpi_ctx.fadt ? "yes" : "no",
                g_acpi_ctx.madt ? "yes" : "no",
@@ -560,13 +561,13 @@ void acpi_reboot(void) {
         uint8_t value = g_acpi_ctx.fadt->reset_value;
         
         outb(port, value);
-        term_printf(term, "[ACPI] Reset via I/O port 0x%x\n", port);
+        tio_printf("[ACPI] Reset via I/O port 0x%x\n", port);
     } else if (g_acpi_ctx.fadt->reset_reg[0] == 0x02) { // System Memory
         uint64_t addr = *(uint64_t*)&g_acpi_ctx.fadt->reset_reg[4];
         uint8_t value = g_acpi_ctx.fadt->reset_value;
         
         *(uint8_t*)(uintptr_t)addr = value;
-        term_printf(term, "[ACPI] Reset via memory 0x%llx\n", addr);
+        tio_printf("[ACPI] Reset via memory 0x%lx\n", addr);
     } else {
         // Fallback
         outb(0x64, 0xFE);
@@ -578,14 +579,14 @@ void acpi_reboot(void) {
 // Выключение через ACPI (S5 state)
 void acpi_shutdown(void) {
     if (!g_acpi_ctx.fadt || !g_acpi_ctx.acpi_enabled) {
-        term_printf(term, "[ACPI] Shutdown not supported\n");
+        tio_printf("[ACPI] Shutdown not supported\n");
         return;
     }
     
     // Входим в состояние S5 (soft off)
     uint16_t pm1a_port = g_acpi_ctx.fadt->pm1a_cnt_blk;
     if (!pm1a_port) {
-        term_printf(term, "[ACPI] No PM1a control port\n");
+        tio_printf("[ACPI] No PM1a control port\n");
         return;
     }
     
@@ -593,7 +594,7 @@ void acpi_shutdown(void) {
     uint16_t value = (7 << 10) | (1 << 13);
     outw(pm1a_port, value);
     
-    term_printf(term, "[ACPI] Shutting down...\n");
+    tio_printf("[ACPI] Shutting down...\n");
     
     // Должны выключиться
     while(1);
@@ -603,36 +604,36 @@ void acpi_shutdown(void) {
 void acpi_dump_info(void) {
     if (!term) return;
     
-    term_printf(term, "=== ACPI Information ===\n");
-    term_printf(term, "RSDP: 0x%llx, Revision: %d, %s\n",
+    tio_printf("=== ACPI Information ===\n");
+    tio_printf("RSDP: 0x%lx, Revision: %d, %s\n",
                (uint64_t)(uintptr_t)g_acpi_ctx.rsdp,
                g_acpi_ctx.rsdp->revision,
                g_acpi_ctx.xsdt_present ? "XSDT" : "RSDT");
     
     if (g_acpi_ctx.fadt) {
-        term_printf(term, "FADT: 0x%llx, SCI IRQ: %d\n",
+        tio_printf("FADT: 0x%lx, SCI IRQ: %d\n",
                    (uint64_t)(uintptr_t)g_acpi_ctx.fadt,
                    g_acpi_ctx.fadt->sci_int);
     }
     
     if (g_acpi_ctx.madt) {
-        term_printf(term, "MADT: 0x%llx, CPUs: %d\n",
+        tio_printf("MADT: 0x%lx, CPUs: %d\n",
                    (uint64_t)(uintptr_t)g_acpi_ctx.madt,
                    acpi_get_cpu_count());
-        term_printf(term, "  Local APIC: 0x%x\n", g_acpi_ctx.local_apic_addr);
-        term_printf(term, "  IO APIC: 0x%x\n", g_acpi_ctx.io_apic_addr);
+        tio_printf("  Local APIC: 0x%x\n", g_acpi_ctx.local_apic_addr);
+        tio_printf("  IO APIC: 0x%x\n", g_acpi_ctx.io_apic_addr);
     }
     
     if (g_acpi_ctx.mcfg) {
-        term_printf(term, "MCFG: 0x%llx\n", 
+        tio_printf("MCFG: 0x%lx\n", 
                    (uint64_t)(uintptr_t)g_acpi_ctx.mcfg);
     }
     
     if (g_acpi_ctx.dsdt) {
-        term_printf(term, "DSDT: 0x%llx, Length: %d\n",
+        tio_printf("DSDT: 0x%lx, Length: %d\n",
                    (uint64_t)(uintptr_t)g_acpi_ctx.dsdt,
                    g_acpi_ctx.dsdt->header.length);
     }
     
-    term_printf(term, "SSDTs: %d\n", g_acpi_ctx.ssdt_count);
+    tio_printf("SSDTs: %d\n", g_acpi_ctx.ssdt_count);
 }

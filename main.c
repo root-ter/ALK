@@ -23,6 +23,7 @@
 #include "drv/usb/ehci/ehci.h"
 #include "base/mem/pmm.h"
 #include "base/mem/paging.h"
+#include "base/term/tio.h"
 
 /* символы из link.ld */
 extern char _heap_start;
@@ -31,10 +32,10 @@ extern char _heap_end;
 // Глобальные переменные
 extern void acpi_monitor_power_button(void);
 extern bool input_waiting;
-term_t* term;
 framebuffer_t fb;
 ide_disk_t disks[4];
 pmm_t pmm;
+term_t* term;
 
 void zombie_reaper_task(void)
 {
@@ -46,20 +47,20 @@ void zombie_reaper_task(void)
 }
  
 void show_alk_logo(term_t* term) {
-    term_printf(term, "\n");
-    term_printf(term, "\n");
-    term_printf(term, "     _____ __     __   __   ____  ____\n");
-    mwait(100);
-    term_printf(term, "    / __  |  |   |  | / /  /    \\| ___|\n");
-    mwait(100);
-    term_printf(term, "   / /__| |  |   |  |/ /   | /\\ |||___\n");
-    mwait(100);
-    term_printf(term, "  /  __   |  |   |     |   | || ||___ |\n");
-    mwait(100);
-    term_printf(term, " /  /  |  |  |___|  |\\ \\   | \\/ | __| |\n");
-    mwait(100);
-    term_printf(term, "/__/   |__|______|__| \\_\\  \\____/|____|\n");
-    term_printf(term, "\n");
+    tio_printf("\n");
+    tio_printf("\n");
+    tio_printf("     _____ __     __   __   ____  ____\n");
+    mwait(50);
+    tio_printf("    / __  |  |   |  | / /  /    \\| ___|\n");
+    mwait(50);
+    tio_printf("   / /__| |  |   |  |/ /   | /\\ |||___\n");
+    mwait(50);
+    tio_printf("  /  __   |  |   |     |   | || ||___ |\n");
+    mwait(50);
+    tio_printf(" /  /  |  |  |___|  |\\ \\   | \\/ | __| |\n");
+    mwait(50);
+    tio_printf("/__/   |__|______|__| \\_\\  \\____/|____|\n");
+    tio_printf("\n");
 }
 
 /*-------------------------------------------------------------
@@ -89,19 +90,23 @@ void kmain(uint64_t mb2_addr)
     uint64_t total_ram = get_total_memory();
     paging_init(total_ram);
 
+    fb_alloc_backbuffer(&fb);
+    fb_enable_vsync(&fb, 60);
+
     uint32_t cols = fb.width / (FONT_WIDTH + 1);
     uint32_t rows = fb.height / (FONT_HEIGHT + 2);
     term = term_init(&fb, 0, 0, cols, rows);
+    tio_init(term);
     fb_fill_rect(&fb, 0, 0, fb.width, fb.height, term->bg_color);
     
-    term_printf(term, "[TERM] Initialized\n");
+    tio_printf("[TERM] Initialized\n");
     
 
     scheduler_init();
-    term_printf(term, "[SCHEDULER] Initialized\n");
+    tio_printf("[SCHEDULER] Initialized\n");
 
     task_create(zombie_reaper_task, 0, "ZombieReap");
-    term_printf(term, "[SCHEDULER] Created task: 'ZombieReap'\n");
+    tio_printf("[SCHEDULER] Created task: 'ZombieReap'\n");
 
     pci_init();
     term_printf(term, "[PCI] Initialized\n");
@@ -109,34 +114,36 @@ void kmain(uint64_t mb2_addr)
     pc_speaker_init();
 
     if (acpi_init()) {
-        term_printf(term, "[ACPI] Found %d CPU(s)\n", acpi_get_cpu_count());
+        tio_printf("[ACPI] Found %d CPU(s)\n", acpi_get_cpu_count());
     } else {
-		rsod("ACPI_INIT_FAILED", "ACPI");
+	rsod("ACPI_INIT_FAILED", "ACPI");
     }
 
-    term_printf(term, "Initializing disk controllers...\n");
+    task_create(acpi_monitor_power_button, 0, "Pwr");
+
+    tio_printf("Initializing disk controllers...\n");
 
     for (int ch = 0; ch < 2; ch++) {
         for (int dr = 0; dr < 2; dr++) {
             int idx = ch * 2 + dr;
             
-            term_printf(term, "Initializing %s/%s... ",
+            tio_printf("Initializing %s/%s... ",
                    ch == 0 ? "Primary" : "Secondary",
                    dr == 0 ? "Master" : "Slave");
             
             int result = ide_init(&disks[idx], (ide_channel_t)ch, dr);
             
             if (result == IDE_OK) {
-                term_printf(term, "OK (Type: %s)\n",
+                tio_printf("OK (Type: %s)\n",
                        disks[idx].type == IDE_TYPE_ATA ? "ATA" : 
                        disks[idx].type == IDE_TYPE_ATAPI ? "ATAPI" : "NONE");
             } else {
-                term_printf(term, "Failed (%d)\n", result);
+                tio_printf("Failed (%d)\n", result);
             }
         }
     }
 
-    term_printf(term, "Initializing block device layer...\n");
+    tio_printf("Initializing block device layer...\n");
     blockdev_init();
 
     blockdev_scan_all_disks();

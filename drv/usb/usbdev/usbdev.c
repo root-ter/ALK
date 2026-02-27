@@ -3,6 +3,7 @@
 #include "../../../libc/string.h"
 #include "../../../base/mem/mem.h"
 #include "../../../base/term/term.h"
+#include "../../../base/term/tio.h"
 
 // ==================== GLOBALS ====================
 
@@ -62,12 +63,12 @@ void usb_core_init(term_t* term) {
     memset(&g_usb, 0, sizeof(g_usb));
     g_usb.term = term;
     
-    term_printf(term, "[USB] Core initialized\n");
+    tio_printf("[USB] Core initialized\n");
 }
 
 usb_device_t* usb_device_add(void* controller_data, uint8_t port, uint8_t speed) {
     if (g_usb.device_count >= USB_MAX_DEVICES) {
-        term_printf(g_usb.term, "[USB] Too many devices\n");
+        tio_printf("[USB] Too many devices\n");
         return NULL;
     }
     
@@ -90,7 +91,7 @@ usb_device_t* usb_device_add(void* controller_data, uint8_t port, uint8_t speed)
     g_usb.devices = dev;
     g_usb.device_count++;
     
-    term_printf(g_usb.term, "[USB] Device added on port %d (%s speed)\n", 
+    tio_printf("[USB] Device added on port %d (%s speed)\n", 
                 port, usb_speed_str(speed));
     
     return dev;
@@ -109,7 +110,7 @@ void usb_device_remove(usb_device_t* dev) {
         p = &(*p)->next;
     }
     
-    term_printf(g_usb.term, "[USB] Device removed: %s\n", dev->name);
+    tio_printf("[USB] Device removed: %s\n", dev->name);
     free(dev);
     g_usb.device_count--;
 }
@@ -124,12 +125,12 @@ static int usb_get_descriptor(usb_device_t* dev, uint8_t type, uint8_t index,
 }
 
 int usb_device_enumerate(usb_device_t* dev) {
-    term_printf(g_usb.term, "[USB] Enumerating device %s...\n", dev->name);
+    tio_printf("[USB] Enumerating device %s...\n", dev->name);
     
     // 1. Get first 8 bytes of device descriptor (to get max packet size)
     uint8_t temp_desc[8];
     if (usb_get_descriptor(dev, USB_DESC_DEVICE, 0, temp_desc, 8) < 0) {
-        term_printf(g_usb.term, "[USB] Failed to get device descriptor\n");
+        tio_printf("[USB] Failed to get device descriptor\n");
         return -1;
     }
     
@@ -139,7 +140,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     dev->address = g_usb.device_count; // Temporary
     if (usb_control_msg(dev, USB_DIR_OUT | USB_REQ_TYPE_STANDARD | USB_RECIP_DEVICE,
                         USB_REQ_SET_ADDRESS, dev->address, 0, 0, NULL, 1000) < 0) {
-        term_printf(g_usb.term, "[USB] Failed to set address\n");
+        tio_printf("[USB] Failed to set address\n");
         return -1;
     }
     
@@ -149,7 +150,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     // 3. Get full device descriptor
     if (usb_get_descriptor(dev, USB_DESC_DEVICE, 0, &dev->device_desc, 
                            sizeof(usb_device_desc_t)) < 0) {
-        term_printf(g_usb.term, "[USB] Failed to get full device descriptor\n");
+        tio_printf("[USB] Failed to get full device descriptor\n");
         return -1;
     }
     
@@ -158,14 +159,14 @@ int usb_device_enumerate(usb_device_t* dev) {
     dev->product_id = dev->device_desc.idProduct;
     dev->bcd_device = dev->device_desc.bcdDevice;
     
-    term_printf(g_usb.term, "[USB] VID=0x%04X, PID=0x%04X, Class=%s\n",
+    tio_printf("[USB] VID=0x%04X, PID=0x%04X, Class=%s\n",
                 dev->vendor_id, dev->product_id,
                 usb_class_str(dev->device_desc.bDeviceClass));
     
     // 4. Get configuration descriptor
     uint8_t config_buf[256];
     if (usb_get_descriptor(dev, USB_DESC_CONFIGURATION, 0, config_buf, 9) < 0) {
-        term_printf(g_usb.term, "[USB] Failed to get config header\n");
+        tio_printf("[USB] Failed to get config header\n");
         return -1;
     }
     
@@ -173,7 +174,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     if (total_len > 256) total_len = 256;
     
     if (usb_get_descriptor(dev, USB_DESC_CONFIGURATION, 0, config_buf, total_len) < 0) {
-        term_printf(g_usb.term, "[USB] Failed to get full config\n");
+        tio_printf("[USB] Failed to get full config\n");
         return -1;
     }
     
@@ -224,13 +225,13 @@ int usb_device_enumerate(usb_device_t* dev) {
     if (usb_control_msg(dev, USB_DIR_OUT | USB_REQ_TYPE_STANDARD | USB_RECIP_DEVICE,
                         USB_REQ_SET_CONFIGURATION, dev->config_desc.bConfigurationValue,
                         0, 0, NULL, 1000) < 0) {
-        term_printf(g_usb.term, "[USB] Failed to set configuration\n");
+        tio_printf("[USB] Failed to set configuration\n");
         return -1;
     }
     
     dev->configuration = dev->config_desc.bConfigurationValue;
     
-    term_printf(g_usb.term, "[USB] Device %s ready, %d interfaces\n",
+    tio_printf("[USB] Device %s ready, %d interfaces\n",
                 dev->name, dev->interface_count);
     
     // 6. Probe class drivers
@@ -243,7 +244,7 @@ int usb_device_enumerate(usb_device_t* dev) {
             if (drv->class_code == iface->class ||
                 (drv->class_code == USB_CLASS_PER_INTERFACE && drv->probe)) {
                 if (drv->probe(dev, iface) == 0) {
-                    term_printf(g_usb.term, "[USB] Driver %s claimed interface %d\n",
+                    tio_printf("[USB] Driver %s claimed interface %d\n",
                                 drv->name, iface->number);
                     break;
                 }
@@ -263,7 +264,7 @@ int usb_register_controller(usb_controller_ops_t* ops, void* controller_data) {
     g_usb.controller_data[g_usb.controller_count] = controller_data;
     g_usb.controller_count++;
     
-    term_printf(g_usb.term, "[USB] Registered controller: %s\n", ops->name);
+    tio_printf("[USB] Registered controller: %s\n", ops->name);
     return g_usb.controller_count - 1;
 }
 
@@ -281,7 +282,7 @@ int usb_register_class_driver(usb_class_driver_t* driver) {
     
     g_usb.class_drivers[g_usb.class_driver_count++] = driver;
     
-    term_printf(g_usb.term, "[USB] Registered class driver: %s (class=0x%02X)\n",
+    tio_printf("[USB] Registered class driver: %s (class=0x%02X)\n",
                 driver->name, driver->class_code);
     
     // Probe existing devices
@@ -436,58 +437,58 @@ void usb_get_device_info(usb_device_t* dev, char* buffer, int size) {
 void usb_dump_device(usb_device_t* dev) {
     if (!dev || !g_usb.term) return;
     
-    term_printf(g_usb.term, "\n=== USB Device: %s ===\n", dev->name);
-    term_printf(g_usb.term, "  Address: %d, Port: %d\n", dev->address, dev->port);
-    term_printf(g_usb.term, "  Speed: %s\n", usb_speed_str(dev->speed));
-    term_printf(g_usb.term, "  VID: 0x%04X, PID: 0x%04X\n", dev->vendor_id, dev->product_id);
-    term_printf(g_usb.term, "  Class: 0x%02X (%s)\n", 
+    tio_printf("\n=== USB Device: %s ===\n", dev->name);
+    tio_printf("  Address: %d, Port: %d\n", dev->address, dev->port);
+    tio_printf("  Speed: %s\n", usb_speed_str(dev->speed));
+    tio_printf("  VID: 0x%04X, PID: 0x%04X\n", dev->vendor_id, dev->product_id);
+    tio_printf("  Class: 0x%02X (%s)\n", 
                 dev->device_desc.bDeviceClass,
                 usb_class_str(dev->device_desc.bDeviceClass));
-    term_printf(g_usb.term, "  Subclass: 0x%02X, Protocol: 0x%02X\n",
+    tio_printf("  Subclass: 0x%02X, Protocol: 0x%02X\n",
                 dev->device_desc.bDeviceSubClass,
                 dev->device_desc.bDeviceProtocol);
-    term_printf(g_usb.term, "  Configurations: %d\n", dev->device_desc.bNumConfigurations);
-    term_printf(g_usb.term, "  Interfaces: %d\n", dev->interface_count);
+    tio_printf("  Configurations: %d\n", dev->device_desc.bNumConfigurations);
+    tio_printf("  Interfaces: %d\n", dev->interface_count);
     
     for (int i = 0; i < dev->interface_count; i++) {
         usb_interface_t* iface = &dev->interfaces[i];
-        term_printf(g_usb.term, "    Interface %d:\n", iface->number);
-        term_printf(g_usb.term, "      Class: 0x%02X, Subclass: 0x%02X, Protocol: 0x%02X\n",
+        tio_printf("    Interface %d:\n", iface->number);
+        tio_printf("      Class: 0x%02X, Subclass: 0x%02X, Protocol: 0x%02X\n",
                     iface->class, iface->subclass, iface->protocol);
-        term_printf(g_usb.term, "      Endpoints: %d\n", iface->ep_count);
+        tio_printf("      Endpoints: %d\n", iface->ep_count);
         
         for (int e = 0; e < iface->ep_count; e++) {
             usb_endpoint_t* ep = &iface->endpoints[e];
-            term_printf(g_usb.term, "        EP 0x%02X: ", ep->address);
+            tio_printf("        EP 0x%02X: ", ep->address);
             switch(ep->type) {
                 case USB_EP_TYPE_CONTROL:    term_printf(g_usb.term, "Control"); break;
                 case USB_EP_TYPE_ISOCHRONOUS: term_printf(g_usb.term, "Isochronous"); break;
                 case USB_EP_TYPE_BULK:       term_printf(g_usb.term, "Bulk"); break;
                 case USB_EP_TYPE_INTERRUPT:  term_printf(g_usb.term, "Interrupt"); break;
             }
-            term_printf(g_usb.term, ", MaxPacket=%d, Interval=%d\n",
+            tio_printf(", MaxPacket=%d, Interval=%d\n",
                         ep->max_packet, ep->interval);
         }
     }
     
-    term_printf(g_usb.term, "========================\n\n");
+    tio_printf("========================\n\n");
 }
 
 void usb_dump_all(void) {
     if (!g_usb.term) return;
     
-    term_printf(g_usb.term, "\n=== USB Devices (%d) ===\n", g_usb.device_count);
+    tio_printf("\n=== USB Devices (%d) ===\n", g_usb.device_count);
     
     usb_device_t* dev = g_usb.devices;
     int index = 1;
     while (dev) {
-        term_printf(g_usb.term, "%d. %s: %04X:%04X (%s speed)\n",
+        tio_printf("%d. %s: %04X:%04X (%s speed)\n",
                     index++, dev->name, dev->vendor_id, dev->product_id,
                     usb_speed_str(dev->speed));
         dev = dev->next;
     }
     
     if (g_usb.device_count == 0) {
-        term_printf(g_usb.term, "No USB devices found\n");
+        tio_printf("No USB devices found\n");
     }
 }

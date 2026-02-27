@@ -1,7 +1,7 @@
 #include "pcs.h"
 #include "../../io/io.h"
 #include "../../../base/time/timer.h"
-#include "../../../base/term/term.h"
+#include "../../../base/term/tio.h"
 #include <stddef.h>
 
 #define PC_SPEAKER_PORT 0x61
@@ -21,8 +21,6 @@ static void enable_speaker(void);
 static void disable_speaker(void);
 static void set_pit_frequency(uint32_t frequency);
 
-extern term_t* term;
-
 void pc_speaker_init(void)
 {
     disable_speaker();
@@ -31,7 +29,7 @@ void pc_speaker_init(void)
 
     if (!pc_speaker_detect)
     {
-        term_printf(term, "[PCS] PCS not found");
+        tio_printf("[PCS] PCS not found");
         return;
     }
 }

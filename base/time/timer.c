@@ -4,9 +4,12 @@
 #include "clock.h"
 #include "../sched/sched.h"
 #include "../rsod/rsod.h"
+#include "../term/tio.h"
+#include "../../drv/fb/fb.h"
 #include "../term/term.h"
-
 extern term_t* term;
+
+extern framebuffer_t fb;
 
 /* PIT (Programmable Interval Timer) порты и команды */
 #define PIT_CMD_PORT 0x43
@@ -224,6 +227,16 @@ void timer_tick(void)
     if ((tick_time % 33) == 0)
     {
         screen_refresh_status = true;
+    }
+
+    if (fb.vsync_enabled && fb.back_buffer) {
+        fb.frame_counter++;
+
+        uint32_t ticks_per_frame = 1000 / fb.target_fps;
+        if (fb.frame_counter >= ticks_per_frame) {
+            fb.frame_counter = 0;
+            fb_swap_buffers(&fb);
+        }
     }
 
     /* Отправляем EOI PIC перед возможным переключением контекста */

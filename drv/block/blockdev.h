@@ -6,7 +6,7 @@
 #include <stdbool.h>
 
 /* Максимальное количество дисков в системе */
-#define MAX_BLOCK_DEVS 16
+#define MAX_BLOCK_DEVS 32
 #define BLOCKDEV_NAME_LEN 32
 
 /* Типы блочных устройств */
@@ -62,11 +62,6 @@ typedef struct blockdev {
             void *ramdisk_data;
             size_t ramdisk_size;
         } ramdisk;
-        
-        struct {
-            void *ahci_dev;     /* Указатель на ahci_device_t */
-            int   port;         /* Номер порта (0..31) */
-        } ahci;
         
     } device_data;
     

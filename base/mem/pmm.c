@@ -1,9 +1,8 @@
 #include "pmm.h"
 #include "../../libc/string.h"
 #include "../../base/mb2/mb2.h"
-#include "../../base/term/term.h"
+#include "../../base/term/tio.h"
 
-extern term_t* term;
 static uint8_t pmm_bitmap[32 * 1024 * 1024]; // 32MB битмап = 256GB памяти
 pmm_t g_pmm;
 
@@ -185,7 +184,7 @@ void* pmm_alloc_page(pmm_t* pmm) {
         }
     }
     
-    term_printf(term, "[PMM] OUT OF MEMORY!\n");
+    tio_printf("[PMM] OUT OF MEMORY!\n");
     return NULL;
 }
 

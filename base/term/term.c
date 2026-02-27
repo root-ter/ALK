@@ -4,9 +4,14 @@
 #include "../mem/mem.h"
 #include "../../drv/kbd/kbd.h"
 #include <stdint.h>
+#include "../../drv/fb/fb.h"
+#include "../term/term.h"
+
+extern term_t* term;
 
 extern volatile uint16_t tick_time;
 
+void term_refresh_prompt(term_t* term);
 void term_redraw_cursor(term_t* term);
 
 // Константы
@@ -453,7 +458,7 @@ void term_clear_input(term_t* term) {
     
     if (term->prompt_enabled) {
         term->needs_redraw = true;
-        refresh_screen(term);
+        term_refresh_prompt(term);
     }
 }
 
@@ -519,7 +524,7 @@ bool term_handle_input(term_t* term, char input_char, char** out_line) {
                 term->input_pos = 0;
                 term->input_cursor = 0;
                 term->needs_redraw = true;
-                refresh_screen(term);
+                term_refresh_prompt(term);
                 return true;
             }
             return false;
@@ -533,12 +538,13 @@ bool term_handle_input(term_t* term, char input_char, char** out_line) {
                 term->input_pos--;
                 term->input_cursor--;
                 term->needs_redraw = true;
-                refresh_screen(term);
+                term_refresh_prompt(term);
             }
             return false;
             
         case 0x03:  // Ctrl+C
             term_clear_input(term);
+	        term_refresh_prompt(term);
             return false;
             
         default:
@@ -558,7 +564,7 @@ bool term_handle_input(term_t* term, char input_char, char** out_line) {
                 term->input_pos++;
                 term->input_cursor++;
                 term->needs_redraw = true;
-                refresh_screen(term);
+                term_refresh_prompt(term);
             }
             return false;
     }
@@ -1088,4 +1094,53 @@ char* term_readline(term_t* term, const char* prompt) {
     can_type = old_can_type;
     
     return result;
+}
+
+void term_refresh_prompt(term_t* term) {
+    if (!term || !term->prompt_enabled || !term->fb) return;
+    
+    // Координаты строки промпта (последняя строка)
+    uint32_t prompt_line = term->rows - 1;
+    uint32_t py = term->y + prompt_line * term->char_height;
+    
+    // Проверяем границы (на всякий случай)
+    if (py + term->char_height > term->fb->height) {
+        py = term->fb->height - term->char_height - 1;
+    }
+    
+    // Очищаем только строку промпта (рисуем фон)
+    fb_fill_rect(term->fb,
+                 term->x, py,
+                 term->cols * term->char_width,
+                 term->char_height,
+                 term->bg_color);
+    
+    // Рисуем текст промпта
+    fb_set_color(term->fb, term->fg_color, term->bg_color);
+    fb_set_cursor(term->fb, term->x, py);
+    fb_print(term->fb, term->prompt_text);
+    
+    // Рисуем введённый текст
+    uint32_t text_x = term->x + strlen(term->prompt_text) * term->char_width;
+    fb_set_cursor(term->fb, text_x, py);
+    
+    for (uint32_t i = 0; i < term->input_pos; i++) {
+        fb_put_char(term->fb, term->input_buffer[i]);
+    }
+    
+    // Рисуем курсор
+    uint32_t cursor_x = term->x + (strlen(term->prompt_text) + term->input_cursor) * term->char_width;
+    fb_set_cursor(term->fb, cursor_x, py);
+    fb_put_char(term->fb, '_');
+    
+    // Копируем только изменённую область на экран
+    if (term->fb->vsync_enabled) {
+        fb_copy_region(term->fb,
+                       term->x, py,
+                       term->cols * term->char_width,
+                       term->char_height);
+    } else {
+        // Если VSync выключен, копируем весь экран (старое поведение)
+        fb_swap_buffers(term->fb);
+    }
 }

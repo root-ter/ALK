@@ -2,14 +2,15 @@
 #include "../disk/ide.h"
 #include "../../base/mem/mem.h"
 #include "../../libc/string.h"
+#include "../../base/term/tio.h"
 #include "../../base/term/term.h"
 #include <stdarg.h>
 
 /* Глобальные переменные */
 static blockdev_t *blockdev_list_head = NULL; /* Изменено имя! */
 static int blockdev_count = 0;
-extern term_t* term;
 extern ide_disk_t disks[4];
+extern term_t* term;
 
 /* Вспомогательные функции для форматирования */
 static void format_size(uint64_t bytes, char *buffer, size_t size) {
@@ -67,30 +68,30 @@ static int ide_flush_wrapper(blockdev_t *bdev) {
 
 /* Инициализация системы блочных устройств */
 void blockdev_init(void) {
-    term_printf(term, "[BLOCKDEV] Initializing block device system...\n");
+    tio_printf("[BLOCKDEV] Initializing block device system...\n");
     
     blockdev_list_head = NULL;
     blockdev_count = 0;
     
-    term_printf(term, "[BLOCKDEV] System ready (max %d devices)\n", 
+    tio_printf( "[BLOCKDEV] System ready (max %d devices)\n", 
                 MAX_BLOCK_DEVS);
 }
 
 blockdev_t* blockdev_register(const char *name, blockdev_type_t type) {
     /* Проверки */
     if (!name || name[0] == '\0') {
-        term_printf(term, "[BLOCKDEV] Error: invalid device name\n");
+        tio_printf("[BLOCKDEV] Error: invalid device name\n");
         return NULL;
     }
     
     if (blockdev_count >= MAX_BLOCK_DEVS) {
-        term_printf(term, "[BLOCKDEV] Error: maximum devices reached\n");
+        tio_printf("[BLOCKDEV] Error: maximum devices reached\n");
         return NULL;
     }
     
     /* Проверяем, нет ли уже устройства с таким именем */
     if (blockdev_find(name)) {
-        term_printf(term, "[BLOCKDEV] Error: device '%s' already exists\n", 
+        tio_printf("[BLOCKDEV] Error: device '%s' already exists\n", 
                     name);
         return NULL;
     }
@@ -98,7 +99,7 @@ blockdev_t* blockdev_register(const char *name, blockdev_type_t type) {
     /* Выделяем память */
     blockdev_t *dev = (blockdev_t*)malloc(sizeof(blockdev_t));
     if (!dev) {
-        term_printf(term, "[BLOCKDEV] Error: memory allocation failed\n");
+        tio_printf("[BLOCKDEV] Error: memory allocation failed\n");
         return NULL;
     }
     
@@ -123,7 +124,7 @@ blockdev_t* blockdev_register(const char *name, blockdev_type_t type) {
     blockdev_list_head = dev;
     blockdev_count++;
     
-    term_printf(term, "[BLOCKDEV] Registered device: %s (type: %d)\n", 
+    tio_printf("[BLOCKDEV] Registered device: %s (type: %d)\n", 
                 name, type);
     
     return dev;
@@ -175,18 +176,18 @@ int blockdev_read(blockdev_t *dev, uint64_t lba,
     }
     
     if (dev->status != BLOCKDEV_READY) {
-        term_printf(term, "[BLOCKDEV] Device %s not ready for reading\n", 
+        tio_printf("[BLOCKDEV] Device %s not ready for reading\n", 
                     dev->name);
         return -1;
     }
     
     if (lba + count > dev->total_sectors) {
-        term_printf(term, "[BLOCKDEV] Read out of bounds on %s\n", dev->name);
+        tio_printf("[BLOCKDEV] Read out of bounds on %s\n", dev->name);
         return -1;
     }
     
     if (!dev->read_sectors) {
-        term_printf(term, "[BLOCKDEV] No read handler for %s\n", dev->name);
+        tio_printf("[BLOCKDEV] No read handler for %s\n", dev->name);
         return -1;
     }
     
@@ -203,18 +204,18 @@ int blockdev_write(blockdev_t *dev, uint64_t lba,
     }
     
     if (dev->status != BLOCKDEV_READY) {
-        term_printf(term, "[BLOCKDEV] Device %s not ready for writing\n", 
+        tio_printf("[BLOCKDEV] Device %s not ready for writing\n", 
                     dev->name);
         return -1;
     }
     
     if (lba + count > dev->total_sectors) {
-        term_printf(term, "[BLOCKDEV] Write out of bounds on %s\n", dev->name);
+        tio_printf("[BLOCKDEV] Write out of bounds on %s\n", dev->name);
         return -1;
     }
     
     if (!dev->write_sectors) {
-        term_printf(term, "[BLOCKDEV] No write handler for %s\n", dev->name);
+        tio_printf("[BLOCKDEV] No write handler for %s\n", dev->name);
         return -1;
     }
     
@@ -318,7 +319,7 @@ void blockdev_unregister(blockdev_t *dev) {
         }
     }
     
-    term_printf(term, "[BLOCKDEV] Unregistered device: %s\n", dev->name);
+    tio_printf("[BLOCKDEV] Unregistered device: %s\n", dev->name);
     
     /* Освобождаем память */
     free(dev);
@@ -329,7 +330,7 @@ void blockdev_unregister(blockdev_t *dev) {
 void blockdev_dump_all(void) {
     if (!term) return;
     
-    term_printf(term, "\n=== Block Devices (%d total) ===\n", blockdev_count);
+    tio_printf("\n=== Block Devices (%d total) ===\n", blockdev_count);
     
     blockdev_t *dev = blockdev_list_head;
     int index = 1;
@@ -353,7 +354,7 @@ void blockdev_dump_all(void) {
             case BLOCKDEV_NO_MEDIA: status_str = "NO MEDIA"; break;
         }
         
-        term_printf(term, "%d. %-8s [%-6s] %-6s %12s  Sectors: %-8lu\n",
+        tio_printf("%d. %-8s [%-6s] %-6s %12s  Sectors: %-8lu\n",
                    index++,
                    dev->name,
                    type_str,
@@ -365,7 +366,7 @@ void blockdev_dump_all(void) {
     }
     
     if (blockdev_count == 0) {
-        term_printf(term, "No block devices found\n");
+        tio_printf("No block devices found\n");
     }
 }
 
@@ -403,19 +404,19 @@ void blockdev_register_ide(void *ide_disk_ptr, const char *name,
     /* Устанавливаем статус */
     bdev->status = BLOCKDEV_READY;
     
-    term_printf(term, "[BLOCKDEV] IDE device %s registered (%lu MB)\n", /* %llu -> %lu */
+    tio_printf("[BLOCKDEV] IDE device %s registered (%lu MB)\n", /* %llu -> %lu */
                name, (unsigned long)(bdev->total_bytes / (1024 * 1024))); /* Приведение типа */
 }
 
 /* Автоматическое сканирование и регистрация всех дисков */
 void blockdev_scan_all_disks(void) {
-    term_printf(term, "[BLOCKDEV] Scanning for all disks...\n");
+    tio_printf("[BLOCKDEV] Scanning for all disks...\n");
     
     int disk_counter = 1;
     char dev_name[BLOCKDEV_NAME_LEN];
     
     // 1. IDE диски
-    term_printf(term, "  Scanning IDE controllers...\n");
+    tio_printf("  Scanning IDE controllers...\n");
     for (int ch = 0; ch < 2; ch++) {
         for (int dr = 0; dr < 2; dr++) {
             int idx = ch * 2 + dr;
@@ -425,8 +426,6 @@ void blockdev_scan_all_disks(void) {
             }
         }
     }
-    
-    
-    term_printf(term, "\n[BLOCKDEV] Scan complete. Found %d devices.\n", 
+    tio_printf("\n[BLOCKDEV] Scan complete. Found %d devices.\n", 
                 blockdev_count);
 }

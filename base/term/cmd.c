@@ -1,5 +1,5 @@
 #include "cmd.h"
-#include "term.h"
+#include "tio.h"
 #include "../sched/sched.h"
 #include "../../drv/acpi/acpi.h"
 #include "../time/clock.h"
@@ -7,37 +7,39 @@
 #include "../../libc/string.h"
 #include "../time/timer.h"
 #include "../../drv/block/blockdev.h"
+#include "term.h"
 #include <stddef.h>
 
 extern term_t* term;
+
 extern volatile ClockTime system_clock;
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 static void cmd_help(void) {
-    term_printf(term, "Available commands:\n");
-    term_printf(term, "  help            - Show this help\n");
-    term_printf(term, "  clear           - Clear screen\n");
-    term_printf(term, "  ps              - List processes\n");
-    term_printf(term, "  ps -l           - Detailed process list\n");
-    term_printf(term, "  time            - Show current time\n");
-    term_printf(term, "  reboot          - Reboot system\n");
-    term_printf(term, "  shutdown        - Shutdown system\n");
-    term_printf(term, "  meminfo         - Show memory information\n");
-    term_printf(term, "  version         - Show kernel version\n");
-    term_printf(term, "  echo <text>     - Echo text\n");
-    term_printf(term, "  kill <pid>      - Kill process by PID\n");
-    term_printf(term, "  tasks           - Show task list\n");
-    term_printf(term, "  disklist        - Show disk list\n");
-    term_printf(term, "  diskinfo <disk> - Show disk info\n");
-    term_printf(term, "  diskread <disk> <lba> <count> - Read disk\n");
-    term_printf(term, "  alk             - Show ALK version\n");
+    tio_printf("Available commands:\n");
+    tio_printf("  help            - Show this help\n");
+    tio_printf("  clear           - Clear screen\n");
+    tio_printf("  ps              - List processes\n");
+    tio_printf("  ps -l           - Detailed process list\n");
+    tio_printf("  time            - Show current time\n");
+    tio_printf("  reboot          - Reboot system\n");
+    tio_printf("  shutdown        - Shutdown system\n");
+    tio_printf("  meminfo         - Show memory information\n");
+    tio_printf("  version         - Show kernel version\n");
+    tio_printf("  echo <text>     - Echo text\n");
+    tio_printf("  kill <pid>      - Kill process by PID\n");
+    tio_printf("  tasks           - Show task list\n");
+    tio_printf("  disklist        - Show disk list\n");
+    tio_printf("  diskinfo <disk> - Show disk info\n");
+    tio_printf("  diskread <disk> <lba> <count> - Read disk\n");
+    tio_printf("  alk             - Show ALK version\n");
 }
 
 static void cmd_clear(void) {
     term_clear(term);
     if (term_is_prompt_enabled(term)) {
-        term_printf(term, "> ");
+        tio_printf("> ");
     }
 }
 
@@ -46,12 +48,12 @@ static void cmd_ps_simple(void) {
     int count = task_list(tasks, 32);
     
     if (count == 0) {
-        term_printf(term, "No tasks running\n");
+        tio_printf("No tasks running\n");
         return;
     }
     
-    term_printf(term, " PID  STATE  NAME\n");
-    term_printf(term, "==== ====== ================\n");
+    tio_printf(" PID  STATE  NAME\n");
+    tio_printf("==== ====== ================\n");
     
     for (int i = 0; i < count; i++) {
         const char* state_str;
@@ -63,7 +65,7 @@ static void cmd_ps_simple(void) {
             default: state_str = "UNK"; break;
         }
         
-        term_printf(term, "%4d  %-4s  %s\n", 
+        tio_printf("%4d  %-4s  %s\n", 
                    tasks[i].pid, state_str, tasks[i].name);
     }
 }
@@ -73,12 +75,12 @@ static void cmd_ps_detailed(void) {
     int count = task_list(tasks, 32);
     
     if (count == 0) {
-        term_printf(term, "No tasks running\n");
+        tio_printf("No tasks running\n");
         return;
     }
     
-    term_printf(term, " PID  STATE     NAME             REGS     STACK   NEXT\n");
-    term_printf(term, "==== ======== ================ ======== ======== ========\n");
+    tio_printf(" PID  STATE     NAME             REGS     STACK   NEXT\n");
+    tio_printf("==== ======== ================ ======== ======== ========\n");
     
     for (int i = 0; i < count; i++) {
         const char* state_str;
@@ -94,28 +96,28 @@ static void cmd_ps_detailed(void) {
         task_t* current = get_current_task();
         const char* current_mark = (current && current->pid == tasks[i].pid) ? "*" : " ";
         
-        term_printf(term, "%4d%s %s %-16s",
+        tio_printf("%4d%s %s %-16s",
                    tasks[i].pid, current_mark, state_str, tasks[i].name);
         
         // Для более подробной информации нужен доступ к структуре task_t
         // Показываем базовую информацию
-        term_printf(term, " %08X %08X\n", 
+        tio_printf(" %08X %08X\n", 
                    tasks[i].pid * 0x1000,  // Заглушка для адреса регистров
                    tasks[i].pid * 0x2000); // Заглушка для стека
     }
     
-    term_printf(term, "\nTotal: %d task(s)\n", count);
-    term_printf(term, "Legend: * = current task\n");
+    tio_printf("\nTotal: %d task(s)\n", count);
+    tio_printf("Note: * = current task\n");
 }
 
 static void cmd_time(void) {
     char time_str[9];
     format_clock(time_str, system_clock);
-    term_printf(term, "Current time: %s\n", time_str);
+    tio_printf("Current time: %s\n", time_str);
 }
 
 static void cmd_reboot(void) {
-    term_printf(term, "Rebooting system...\n");
+    tio_printf("Rebooting system...\n");
     acpi_reboot();
     // Если ACPI не сработал, пробуем 8042 контроллер
     asm volatile("outb %%al, %%dx" : : "a"((uint8_t)0xFE), "d"((uint16_t)0x64));
@@ -123,10 +125,10 @@ static void cmd_reboot(void) {
 }
 
 static void cmd_shutdown(void) {
-    term_printf(term, "Shutting down...\n");
+    tio_printf("Shutting down...\n");
     acpi_shutdown();
     // Если ACPI не сработал, просто останавливаем
-    term_printf(term, "ACPI shutdown failed. System halted.\n");
+    tio_printf("ACPI shutdown failed. System halted.\n");
     while(1) asm volatile("hlt");
 }
 
@@ -134,67 +136,67 @@ static void cmd_meminfo(void) {
     kmalloc_stats_t stats;
     get_kmalloc_stats(&stats);
     
-    term_printf(term, "Kernel Heap Statistics:\n");
-    term_printf(term, "  Total managed:   %u bytes\n", stats.total_managed);
-    term_printf(term, "  Used payload:    %u bytes\n", stats.used_payload);
-    term_printf(term, "  Free payload:    %u bytes\n", stats.free_payload);
-    term_printf(term, "  Largest free:    %u bytes\n", stats.largest_free);
-    term_printf(term, "  Number of blocks:%u\n", stats.num_blocks);
-    term_printf(term, "  Used blocks:     %u\n", stats.num_used);
-    term_printf(term, "  Free blocks:     %u\n", stats.num_free);
+    tio_printf("Kernel Heap Statistics:\n");
+    tio_printf("  Total managed:   %lu bytes\n", stats.total_managed);
+    tio_printf("  Used payload:    %lu bytes\n", stats.used_payload);
+    tio_printf("  Free payload:    %lu bytes\n", stats.free_payload);
+    tio_printf("  Largest free:    %lu bytes\n", stats.largest_free);
+    tio_printf("  Number of blocks:%lu\n", stats.num_blocks);
+    tio_printf("  Used blocks:     %lu\n", stats.num_used);
+    tio_printf("  Free blocks:     %lu\n", stats.num_free);
     
     uint64_t total_memory = mb2_get_usable_memory();
-    term_printf(term, "\nSystem Memory:\n");
-    term_printf(term, "  Total RAM:       %llu MB\n", total_memory / (1024 * 1024));
-    term_printf(term, "  Used by kernel:  %u KB\n", stats.total_managed / 1024);
+    tio_printf("\nSystem Memory:\n");
+    tio_printf("  Total RAM:       %lu MB\n", total_memory / (1024 * 1024));
+    tio_printf("  Used by kernel:  %lu KB\n", stats.total_managed / 1024);
 }
 
 static void cmd_version(void) {
-    term_printf(term, "ALK Kernel Version 0.02\n");
-    term_printf(term, "Built: %s %s\n", __DATE__, __TIME__);
-    term_printf(term, "Architecture: x86_64\n");
-    term_printf(term, "Author: 13-year-old kernel developer\n");
-    term_printf(term, "Features:\n");
-    term_printf(term, "  - 64-bit protected mode\n");
-    term_printf(term, "  - Multiboot2 compliant\n");
-    term_printf(term, "  - ACPI support\n");
-    term_printf(term, "  - PCI/PCIe scanning\n");
-    term_printf(term, "  - AHCI SATA driver\n");
-    term_printf(term, "  - Cooperative multitasking\n");
-    term_printf(term, "  - Framebuffer console\n");
+    tio_printf("ALK Kernel Version 0.03\n");
+    tio_printf("Built: %s %s\n", __DATE__, __TIME__);
+    tio_printf("Architecture: x86_64\n");
+    tio_printf("Author: 13-year-old kernel developer\n");
+    tio_printf("Features:\n");
+    tio_printf("  - 64-bit protected mode\n");
+    tio_printf("  - Multiboot2 compliant\n");
+    tio_printf("  - ACPI support\n");
+    tio_printf("  - PCI/PCIe scanning\n");
+    tio_printf("  - AHCI SATA driver\n");
+    tio_printf("  - Cooperative multitasking\n");
+    tio_printf("  - Framebuffer console\n");
 }
 
 static void cmd_echo(char* args) {
     if (args && args[0] != '\0') {
-        term_printf(term, "%s\n", args);
+        tio_printf("%s\n", args);
     } else {
-        term_printf(term, "\n");
+        tio_printf("\n");
     }
 }
 
 static void cmd_kill(char* args) {
     if (!args || args[0] == '\0') {
-        term_printf(term, "Usage: kill <pid>\n");
+        tio_printf("Usage: kill <pid>\n");
         return;
     }
     
     int pid = atoi(args);
-    if (pid <= 0) {
-        term_printf(term, "Invalid PID: %s\n", args);
+    if (pid < 0) {
+        tio_printf("Invalid PID: %s\n", args);
         return;
     }
     
     // Нельзя убить PID 0 (ядро)
     if (pid == 0) {
-        term_printf(term, "Cannot kill kernel process (PID 0)\n");
+        tio_printf("Cannot kill kernel process (PID 0)\n");
         return;
     }
     
     int result = task_stop(pid);
     if (result == 0) {
-        term_printf(term, "Process %d terminated\n", pid);
+        tio_printf("Process %d terminated\n", pid);
     } else {
-        term_printf(term, "Failed to kill process %d (not found)\n", pid);
+        tio_printf("Failed to kill process %d\n", pid);
     }
 }
 
@@ -202,8 +204,8 @@ static void cmd_tasks(void) {
     task_info_t tasks[32];
     int count = task_list(tasks, 32);
     
-    term_printf(term, "Total tasks: %d\n", count);
-    term_printf(term, "===============\n");
+    tio_printf("Total tasks: %d\n", count);
+    tio_printf("===============\n");
     
     for (int i = 0; i < count; i++) {
         const char* state_str;
@@ -215,7 +217,7 @@ static void cmd_tasks(void) {
             default: state_str = "UNKNOWN"; break;
         }
         
-        term_printf(term, "%4d [%s] %s\n", 
+        tio_printf("%4d [%s] %s\n", 
                    tasks[i].pid, state_str, tasks[i].name);
     }
 }
@@ -225,12 +227,12 @@ static void cmd_disklist(void) {
     int count = blockdev_get_list(list, MAX_BLOCK_DEVS);
     
     if (count == 0) {
-        term_printf(term, "No block devices found\n");
+        tio_printf("No block devices found\n");
         return;
     }
     
-    term_printf(term, "Disk  Size       Type  Status  Name\n");
-    term_printf(term, "----  ---------  ----  ------  --------\n");
+    tio_printf("Disk  Size       Type  Status  Name\n");
+    tio_printf("----  ---------  ----  ------  --------\n");
     
     for (int i = 0; i < count; i++) {
         char size_str[32];
@@ -254,61 +256,61 @@ static void cmd_disklist(void) {
             case BLOCKDEV_UNINITIALIZED: status_str = "Uninit"; break;
         }
         
-        term_printf(term, "%4d  %-9s  %-4s  %-6s  %s\n",
+        tio_printf("%4d  %-9s  %-4s  %-6s  %s\n",
                    i + 1, size_str, type_str, status_str, list[i]->name);
     }
 }
 
 static void cmd_diskinfo(char* args) {
     if (!args || args[0] == '\0') {
-        term_printf(term, "Usage: diskinfo <disk_name>\n");
-        term_printf(term, "Example: diskinfo dsk_1\n");
+        tio_printf("Usage: diskinfo <disk_name>\n");
+        tio_printf("Example: diskinfo dsk_1\n");
         return;
     }
     
     // Убираем пробелы
     while (*args == ' ') args++;
     
-    term_printf(term, "Looking for device: '%s'\n", args);
+    tio_printf("Looking for device: '%s'\n", args);
     
     blockdev_t* dev = blockdev_find(args);
     if (!dev) {
-        term_printf(term, "Device '%s' not found!\n", args);
-        term_printf(term, "Available devices:\n");
+        tio_printf("Device '%s' not found!\n", args);
+        tio_printf("Available devices:\n");
         
         blockdev_t* list[16];
         int count = blockdev_get_list(list, 16);
         for (int i = 0; i < count; i++) {
-            term_printf(term, "  %s\n", list[i]->name);
+            tio_printf("  %s\n", list[i]->name);
         }
         return;
     }
     
     // Проверяем, что устройство готово
     if (dev->status != BLOCKDEV_READY) {
-        term_printf(term, "Device '%s' is not ready (status: %d)\n", 
+        tio_printf("Device '%s' is not ready (status: %d)\n", 
                     args, dev->status);
         return;
     }
     
     // БЕЗОПАСНО выводим информацию
-    term_printf(term, "\n=== Device: %s ===\n", dev->name);
-    term_printf(term, "Type: %d\n", dev->type);
-    term_printf(term, "Status: %d\n", dev->status);
-    term_printf(term, "Sector size: %lu bytes\n", (unsigned long)dev->sector_size);
-    term_printf(term, "Total sectors: %lu\n", (unsigned long)dev->total_sectors);
-    term_printf(term, "Total size: %lu MB\n", 
+    tio_printf("\n=== Device: %s ===\n", dev->name);
+    tio_printf("Type: %d\n", dev->type);
+    tio_printf("Status: %d\n", dev->status);
+    tio_printf("Sector size: %lu bytes\n", (unsigned long)dev->sector_size);
+    tio_printf("Total sectors: %lu\n", (unsigned long)dev->total_sectors);
+    tio_printf("Total size: %lu MB\n", 
                 (unsigned long)(dev->total_bytes / (1024 * 1024)));
-    term_printf(term, "LBA48: %s\n", dev->supports_lba48 ? "Yes" : "No");
+    tio_printf("LBA48: %s\n", dev->supports_lba48 ? "Yes" : "No");
     
     // Если есть read/write функции - проверяем что они не NULL
-    term_printf(term, "Read handler: %s\n", dev->read_sectors ? "OK" : "MISSING!");
-    term_printf(term, "Write handler: %s\n", dev->write_sectors ? "OK" : "MISSING!");
+    tio_printf("Read handler: %s\n", dev->read_sectors ? "OK" : "MISSING!");
+    tio_printf("Write handler: %s\n", dev->write_sectors ? "OK" : "MISSING!");
     
     // Статистика
-    term_printf(term, "Reads: %lu\n", (unsigned long)dev->read_count);
-    term_printf(term, "Writes: %lu\n", (unsigned long)dev->write_count);
-    term_printf(term, "Errors: %lu\n", (unsigned long)dev->error_count);
+    tio_printf("Reads: %lu\n", (unsigned long)dev->read_count);
+    tio_printf("Writes: %lu\n", (unsigned long)dev->write_count);
+    tio_printf("Errors: %lu\n", (unsigned long)dev->error_count);
 }
 
 static void cmd_diskread(char* args) {
@@ -316,7 +318,7 @@ static void cmd_diskread(char* args) {
     // Пример: diskread dsk_1 0 1
     
     if (!args || args[0] == '\0') {
-        term_printf(term, "Usage: diskread <device> <lba> <count>\n");
+        tio_printf("Usage: diskread <device> <lba> <count>\n");
         return;
     }
     
@@ -327,13 +329,13 @@ static void cmd_diskread(char* args) {
     char* count_str = strtok_r(NULL, " ", &saveptr);
     
     if (!dev_name || !lba_str || !count_str) {
-        term_printf(term, "Usage: diskread <device> <lba> <count>\n");
+        tio_printf("Usage: diskread <device> <lba> <count>\n");
         return;
     }
     
     blockdev_t* dev = blockdev_find(dev_name);
     if (!dev) {
-        term_printf(term, "Device '%s' not found\n", dev_name);
+        tio_printf("Device '%s' not found\n", dev_name);
         return;
     }
     
@@ -341,7 +343,7 @@ static void cmd_diskread(char* args) {
     uint32_t count = atoi(count_str);
     
     if (count == 0 || count > 256) {
-        term_printf(term, "Count must be 1-256\n");
+        tio_printf("Count must be 1-256\n");
         return;
     }
     
@@ -350,43 +352,43 @@ static void cmd_diskread(char* args) {
     uint8_t* buffer = (uint8_t*)malloc(buffer_size);
     
     if (!buffer) {
-        term_printf(term, "Memory allocation failed\n");
+        tio_printf("Memory allocation failed\n");
         return;
     }
     
-    term_printf(term, "Reading %u sectors from LBA %llu...\n", count, lba);
+    tio_printf("Reading %u sectors from LBA %lu...\n", count, lba);
     
     int result = blockdev_read(dev, lba, count, buffer);
     
     if (result == 0) {
-        term_printf(term, "Read successful\n");
+        tio_printf("Read successful\n");
         
         // Выводим первые 16 байт в hex
-        term_printf(term, "First 16 bytes: ");
+        tio_printf("First 16 bytes: ");
         for (int i = 0; i < 16 && i < buffer_size; i++) {
-            term_printf(term, "%02X ", buffer[i]);
+            tio_printf("%02X ", buffer[i]);
         }
-        term_printf(term, "\n");
+        tio_printf("\n");
     } else {
-        term_printf(term, "Read failed\n");
+        tio_printf("Read failed\n");
     }
     
     free(buffer);
 }
 
 void cmd_alk(void) {
-    term_printf(term, "\n");
-    term_printf(term, "     _____ __     __   __   ____  ____\n");
-    term_printf(term, "    / __  |  |   |  | / /  /    \\| ___|\n");
-    term_printf(term, "   / /__| |  |   |  |/ /   | /\\ |||___\n");
-    term_printf(term, "  /  __   |  |   |     |   | || ||___ |\n");
-    term_printf(term, " /  /  |  |  |___|  |\\ \\   | \\/ | __| |\n");
-    term_printf(term, "/__/   |__|______|__| \\_\\  \\____/|____|\n");
-    term_printf(term, "\n");
-    term_printf(term, "ALK OS v0.03\n");
-    term_printf(term, "Shell:\n");
-    term_printf(term, "  ALKShell\n");
-    term_printf(term, "\nWe hope you have a good experience by using ALK :)\n");
+    tio_printf("\n");
+    tio_printf("     _____ __     __   __   ____  ____\n");
+    tio_printf("    / __  |  |   |  | / /  /    \\| ___|\n");
+    tio_printf("   / /__| |  |   |  |/ /   | /\\ |||___\n");
+    tio_printf("  /  __   |  |   |     |   | || ||___ |\n");
+    tio_printf(" /  /  |  |  |___|  |\\ \\   | \\/ | __| |\n");
+    tio_printf("/__/   |__|______|__| \\_\\  \\____/|____|\n");
+    tio_printf("\n");
+    tio_printf("ALK OS v0.03\n");
+    tio_printf("Shell:\n");
+    tio_printf("  ALKShell\n");
+    tio_printf("\nWe hope you have a good experience by using ALK :)\n");
 }
 
 // ==================== ОСНОВНАЯ ФУНКЦИЯ ОБРАБОТКИ КОМАНД ====================
@@ -450,8 +452,8 @@ int term_execute_command(char* cmdline) {
     } else if (strcmp(cmd, "alk") == 0) {
         cmd_alk();
     } else {
-        term_printf(term, "Unknown command: %s\n", cmd);
-        term_printf(term, "Type 'help' for available commands\n");
+        tio_printf("Unknown command: %s\n", cmd);
+        tio_printf("Type 'help' for available commands\n");
         return -1;
     }
     
@@ -461,7 +463,7 @@ int term_execute_command(char* cmdline) {
 // ==================== ИНИЦИАЛИЗАЦИЯ КОМАНД ====================
 
 void term_commands_init(void) {
-    term_printf(term, "Command processor initialized\n");
+    tio_printf("Command processor initialized\n");
 }
 
 // Функция для обработки ввода из прерывания клавиатуры
@@ -484,13 +486,13 @@ void term_handle_command_input(char input_char) {
                 
                 // Показываем промпт снова
                 if (term_is_prompt_enabled(term)) {
-                    term_printf(term, "> ");
+                    tio_printf("> ");
                 }
             } else {
                 // Просто новая строка
-                term_printf(term, "\n");
+                tio_printf("\n");
                 if (term_is_prompt_enabled(term)) {
-                    term_printf(term, "> ");
+                    tio_printf("> ");
                 }
             }
             break;
@@ -507,7 +509,7 @@ void term_handle_command_input(char input_char) {
             cmd_pos = 0;
             term_printf(term, "^C\n");
             if (term_is_prompt_enabled(term)) {
-                term_printf(term, "> ");
+                tio_printf("> ");
             }
             break;
             

@@ -1,4 +1,4 @@
-#include "../term/term.h"
+#include "../term/tio.h"
 #include "../../drv/fb/fb.h"
 #include "rsod.h"
 #include "../../libc/string.h"
@@ -7,11 +7,12 @@
 #include "../../drv/acpi/acpi.h"
 #include "../time/timer.h"
 #include "../../drv/kbd/kbd.h"
+#include "../term/term.h"
 #include <stdint.h>
 #include <stdbool.h>
 
-extern term_t* term;
 extern framebuffer_t fb;
+extern term_t* term;
 
 int rsod_is_running = 0;
 

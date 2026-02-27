@@ -56,6 +56,13 @@ typedef struct {
         uint8_t green_shift;
         uint8_t blue_shift;
     } rgb;
+
+    uint8_t* back_buffer;
+    uint32_t back_buffer_size;
+    bool vsync_enabled;
+    uint32_t frame_counter;
+    uint32_t target_fps;
+    bool back_buffer_allocated;
 } framebuffer_t;
 
 // Инициализация фреймбуфера
@@ -84,5 +91,13 @@ void fb_printf(framebuffer_t* fb, const char* fmt, ...);
 uint32_t fb_rgb_to_pixel(framebuffer_t* fb, color_t color);
 void fb_scroll(framebuffer_t* fb, uint32_t lines);
 void fb_newline(framebuffer_t* fb);
+
+void fb_swap_buffers(framebuffer_t* fb);
+void fb_enable_vsync(framebuffer_t* fb, uint32_t fps);
+void fb_disable_vsync(framebuffer_t* fb);
+bool fb_alloc_backbuffer(framebuffer_t* fb);
+
+void fb_copy_region(framebuffer_t* fb, uint32_t x, uint32_t y, 
+                    uint32_t width, uint32_t height);
 
 #endif // FRAMEBUFFER_H
