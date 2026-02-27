@@ -1,11 +1,10 @@
-// mem/pmm.c - ПОЛНАЯ ВЕРСИЯ, БЕЗ ХУЙНИ
 #include "pmm.h"
 #include "../../libc/string.h"
 #include "../../base/mb2/mb2.h"
 #include "../../base/term/term.h"
 
 extern term_t* term;
-static uint8_t pmm_bitmap[32 * 1024 * 1024]; // 32MB битмап = 256GB памяти (дохуя)
+static uint8_t pmm_bitmap[32 * 1024 * 1024]; // 32MB битмап = 256GB памяти
 pmm_t g_pmm;
 
 void pmm_init(pmm_t* pmm, uint64_t mb2_addr) {

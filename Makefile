@@ -4,7 +4,7 @@ AS      := nasm
 QEMU    := qemu-system-x86_64
 
 # Флаги компилятора
-BASE_CFLAGS := -m64
+BASE_CFLAGS := -m64 -g
 DEBUG_CFLAGS := -m64 -g -O0 -DDEBUG
 
 # Флаги линковки

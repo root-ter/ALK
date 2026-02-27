@@ -4,6 +4,9 @@
 #include "clock.h"
 #include "../sched/sched.h"
 #include "../rsod/rsod.h"
+#include "../term/term.h"
+
+extern term_t* term;
 
 /* PIT (Programmable Interval Timer) порты и команды */
 #define PIT_CMD_PORT 0x43
@@ -211,6 +214,10 @@ void timer_tick(void)
         tick_time = 0;
         seconds++;
         clock_tick();
+    }
+    
+    if (term && term->prompt_enabled) {
+        term_redraw_cursor(term);
     }
 
     /* Экран обновляется каждые ~33 мс (при частоте ~30 Гц) */

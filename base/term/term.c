@@ -2,7 +2,12 @@
 #include <stdarg.h>
 #include "../../libc/string.h"
 #include "../mem/mem.h"
+#include "../../drv/kbd/kbd.h"
 #include <stdint.h>
+
+extern volatile uint16_t tick_time;
+
+void term_redraw_cursor(term_t* term);
 
 // Константы
 #define HISTORY_CAPACITY 1024  // Максимум 1024 строк в истории
@@ -75,14 +80,19 @@ static void draw_prompt_line(term_t* term) {
     uint32_t cursor_x = strlen(term->prompt_text) + term->input_cursor;
     if (cursor_x < term->cols) {
         uint32_t cursor_px = term->x + cursor_x * term->char_width;
-        uint32_t cursor_py = py + FONT_HEIGHT - 2;
+        uint32_t cursor_py = py;  // py - это Y-координата строки промпта
         
-        // Проверяем границы курсора
-        if (cursor_px < term->x + term->cols * term->char_width) {
-            fb_fill_rect(term->fb,
-                         cursor_px, cursor_py,
-                         term->char_width, 2,
-                         term->fg_color);
+        // Мигаем каждые 250ms (при 1000 тиков/сек = 250 тиков)
+        if ((tick_time / 250) % 2 == 0) {
+            // Рисуем курсор
+            fb_set_cursor(term->fb, cursor_px, cursor_py);
+            fb_set_color(term->fb, term->fg_color, term->bg_color);
+            fb_put_char(term->fb, '_');
+        } else {
+            // Стираем курсор (рисуем пробел)
+            fb_set_cursor(term->fb, cursor_px, cursor_py);
+            fb_set_color(term->fb, term->bg_color, term->bg_color);
+            fb_put_char(term->fb, ' ');
         }
     }
 }
@@ -144,41 +154,75 @@ static void refresh_screen(term_t* term) {
 
 // ==================== ИНИЦИАЛИЗАЦИЯ ====================
 
+// base/term/term.c - Новая версия term_init
+
 term_t* term_init(framebuffer_t* fb, uint32_t x, uint32_t y, 
                   uint32_t cols, uint32_t rows) {
-    term_t* term = malloc(sizeof(term_t));
-    if (!term) return NULL;
+    // ------------------------------------------------------------
+    // 1. Валидация входных параметров
+    // ------------------------------------------------------------
+    if (!fb) {
+        // нет фреймбуфера - никакого терминала не будет
+        return NULL;
+    }
     
-    // Базовые параметры
+    if (cols == 0 || rows == 0 || cols > 512 || rows > 256) {
+        // разумные пределы, чтобы malloc не охерел
+        return NULL;
+    }
+    
+    // ------------------------------------------------------------
+    // 2. Выделяем память под структуру терминала
+    // ------------------------------------------------------------
+    term_t* term = (term_t*)malloc(sizeof(term_t));
+    if (!term) {
+        return NULL;
+    }
+    
+    // ------------------------------------------------------------
+    // 3. Заполняем базовые поля (сначала самые простые)
+    // ------------------------------------------------------------
     term->fb = fb;
     term->x = x;
     term->y = y;
     term->cols = cols;
     term->rows = rows;
-    term->char_width = FONT_WIDTH + 1;
-    term->char_height = FONT_HEIGHT + 2;
+    term->char_width = FONT_WIDTH + 1;      // из fb.h
+    term->char_height = FONT_HEIGHT + 2;    // из fb.h
+    
     term->cursor_x = 0;
     term->cursor_y = 0;
     term->scroll_offset = 0;
     term->total_lines = 0;
-    term->bg_color = (color_t){128, 0, 128};
-    term->fg_color = (color_t){255, 255, 255};
-    term->lock = 0;
     
-    // История
-    term->history_size = HISTORY_CAPACITY;
+    term->fg_color = (color_t){255, 255, 255};  // белый
+    term->bg_color = (color_t){128, 0, 128};    // фиолетовый (как у тебя)
+    
+    term->lock = 0;
+    term->needs_redraw = true;
+    
+    // ------------------------------------------------------------
+    // 4. Инициализация истории (кольцевой буфер)
+    // ------------------------------------------------------------
+    term->history_size = HISTORY_CAPACITY;  // 1024 из term.h
     term->history_start = 0;
     term->history_end = 0;
-    term->history_buffer = malloc(term->history_size * (cols + 1));
+    term->total_lines = 0;
+    
+    // Выделяем память под историю
+    size_t history_bytes = term->history_size * (cols + 1);
+    term->history_buffer = (char*)malloc(history_bytes);
     if (!term->history_buffer) {
         free(term);
         return NULL;
     }
-    memset(term->history_buffer, 0, term->history_size * (cols + 1));
+    memset(term->history_buffer, 0, history_bytes);
     
-    // Экранный буфер
+    // ------------------------------------------------------------
+    // 5. Инициализация экранного буфера
+    // ------------------------------------------------------------
     term->screen_size = rows * (cols + 1);
-    term->screen_buffer = malloc(term->screen_size);
+    term->screen_buffer = (char*)malloc(term->screen_size);
     if (!term->screen_buffer) {
         free(term->history_buffer);
         free(term);
@@ -186,25 +230,61 @@ term_t* term_init(framebuffer_t* fb, uint32_t x, uint32_t y,
     }
     memset(term->screen_buffer, ' ', term->screen_size);
     
-    // Ввод
+    // ------------------------------------------------------------
+    // 6. Инициализация буфера ввода
+    // ------------------------------------------------------------
     term->prompt_enabled = false;
-    term->input_buffer = malloc(INPUT_BUFFER_SIZE);
+    term->input_capacity = INPUT_BUFFER_SIZE - 1;  // 255
+    term->input_pos = 0;
+    term->input_cursor = 0;
+    
+    term->input_buffer = (char*)malloc(INPUT_BUFFER_SIZE);
     if (!term->input_buffer) {
         free(term->screen_buffer);
         free(term->history_buffer);
         free(term);
         return NULL;
     }
-    term->input_capacity = INPUT_BUFFER_SIZE - 1;
-    term->input_pos = 0;
-    term->input_cursor = 0;
+    memset(term->input_buffer, 0, INPUT_BUFFER_SIZE);
     term->input_buffer[0] = '\0';
-    strcpy(term->prompt_text, DEFAULT_PROMPT);
     
-    term->needs_redraw = true;
+    // ------------------------------------------------------------
+    // 7. Копируем текст промпта (безопасно)
+    // ------------------------------------------------------------
+    const char* default_prompt = "> ";
+    size_t prompt_len = strlen(default_prompt);
+    if (prompt_len >= sizeof(term->prompt_text)) {
+        prompt_len = sizeof(term->prompt_text) - 1;
+    }
+    memcpy(term->prompt_text, default_prompt, prompt_len);
+    term->prompt_text[prompt_len] = '\0';
     
-    // Очищаем и рисуем начальное состояние
-    term_clear(term);
+    // ------------------------------------------------------------
+    // 8. Очищаем экран и рисуем начальное состояние
+    // ------------------------------------------------------------
+    fb_fill_rect(term->fb, 
+                 term->x, term->y,
+                 term->cols * term->char_width,
+                 term->rows * term->char_height,
+                 term->bg_color);
+    
+    // Если нужно, можно сразу нарисовать промпт
+    // но мы пока не включаем его
+    
+    // ------------------------------------------------------------
+    // 9. Финальная проверка (для отладки)
+    // ------------------------------------------------------------
+#ifdef DEBUG_TERM
+    // Проверяем, что все поля заполнены
+    if ((uintptr_t)term->fb < 0x1000) {
+        // какой-то пиздец
+        free(term->input_buffer);
+        free(term->screen_buffer);
+        free(term->history_buffer);
+        free(term);
+        return NULL;
+    }
+#endif
     
     return term;
 }
@@ -377,11 +457,55 @@ void term_clear_input(term_t* term) {
     }
 }
 
+// Новая функция - перерисовывает только курсор
+void term_redraw_cursor(term_t* term) {
+    if (!term || !term->prompt_enabled || !term->fb) return;
+    
+    // Координаты строки промпта
+    uint32_t prompt_line = term->rows - 1;
+    uint32_t py = term->y + prompt_line * term->char_height;
+    
+    // Проверка границ
+    if (py + term->char_height > term->fb->height) {
+        py = term->fb->height - term->char_height - 1;
+        if (py < term->y) py = term->y;
+    }
+    
+    // Вычисляем позицию курсора
+    uint32_t cursor_x = strlen(term->prompt_text) + term->input_cursor;
+    if (cursor_x >= term->cols) return;
+    
+    uint32_t cursor_px = term->x + cursor_x * term->char_width;
+    uint32_t cursor_py = py;
+    
+    if ((tick_time / 125) % 2 == 0) {  // 0.25 сек при 500Hz
+        // Рисуем курсор
+        fb_set_cursor(term->fb, cursor_px, cursor_py);
+        fb_set_color(term->fb, term->fg_color, term->bg_color);
+        fb_put_char(term->fb, '_');
+    } else {
+        // Стираем курсор - нужно восстановить символ под курсором
+        if (term->input_cursor < term->input_pos) {
+            // Под курсором есть символ - рисуем его
+            fb_set_cursor(term->fb, cursor_px, cursor_py);
+            fb_set_color(term->fb, term->fg_color, term->bg_color);
+            fb_put_char(term->fb, term->input_buffer[term->input_cursor]);
+        } else {
+            // Под курсором пусто - рисуем пробел
+            fb_set_cursor(term->fb, cursor_px, cursor_py);
+            fb_set_color(term->fb, term->bg_color, term->bg_color);
+            fb_put_char(term->fb, ' ');
+        }
+    }
+}
+
 // ==================== ОБРАБОТКА ВВОДА С КЛАВИАТУРЫ ====================
 
 bool term_handle_input(term_t* term, char input_char, char** out_line) {
     if (!term->prompt_enabled) return false;
     if (out_line) *out_line = NULL;
+    
+    
     
     switch (input_char) {
         case '\n':  // Enter
@@ -893,4 +1017,75 @@ void term_clear_prompt(term_t* term) {
     
     // Перерисовываем экран
     refresh_screen(term);
+}
+
+char* term_readline(term_t* term, const char* prompt) {
+    // Сохраняем старое состояние can_type
+    extern volatile bool input_waiting;
+    bool old_can_type = can_type;
+    bool old_input_waiting = input_waiting;
+    
+    input_waiting = true;
+    
+    // Временно включаем ввод если был выключен
+    if (!can_type) {
+        can_type = true;
+    }
+    
+    // Сохраняем старый промпт
+    char old_prompt[32];
+    strcpy(old_prompt, term->prompt_text);
+    
+    // Устанавливаем новый промпт если нужно
+    if (prompt) {
+        term_set_prompt_text(term, prompt);
+    }
+    
+    // Включаем промпт если выключен
+    bool was_enabled = term->prompt_enabled;
+    if (!was_enabled) {
+        term_enable_prompt(term);
+    }
+    
+    // Очищаем буфер ввода
+    term_clear_input(term);
+    
+    // Ждем Enter
+    char* result = NULL;
+    static char result_buf[256];  // Статический буфер для результата
+    
+    while (1) {
+        // Проверяем клавиатурный буфер
+        char c = kbd_getchar();
+        if (c != -1) {
+            // Передаем символ в обработчик
+            char* line = NULL;
+            if (term_handle_input(term, c, &line)) {
+                // Пользователь нажал Enter
+                if (line && line[0] != '\0') {
+                    strncpy(result_buf, line, sizeof(result_buf) - 1);
+                    result_buf[sizeof(result_buf) - 1] = '\0';
+                    result = result_buf;
+                }
+                break;
+            }
+        }
+        
+        // Небольшая пауза чтобы не грузить CPU
+        asm volatile("pause");
+    }
+    
+    // Восстанавливаем состояние
+    if (!was_enabled) {
+        term_disable_prompt(term);
+    }
+    if (prompt) {
+        term_set_prompt_text(term, old_prompt);
+    }
+    
+    // Восстанавливаем оригинальное состояние can_type
+    input_waiting = old_input_waiting;
+    can_type = old_can_type;
+    
+    return result;
 }

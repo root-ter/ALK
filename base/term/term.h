@@ -76,5 +76,8 @@ void term_get_size(term_t* term, uint32_t* cols, uint32_t* rows);
 void term_get_cursor(term_t* term, uint32_t* x, uint32_t* y);
 
 void term_clear_prompt(term_t* term);
+void term_redraw_cursor(term_t* term);
+
+char* term_readline(term_t* term, const char* prompt);
 
 #endif

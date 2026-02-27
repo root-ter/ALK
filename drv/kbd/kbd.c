@@ -12,6 +12,7 @@ extern term_t* term;
 bool shift_down = false;
 bool caps_lock = false;
 bool ctrl_down = false;
+volatile bool input_waiting = false;
 
 volatile bool can_type = true;
 
@@ -261,7 +262,7 @@ void keyboard_handler(void)
     bool released = code & 0x80;
     uint8_t key = code & 0x7F;
 
-    if (!can_type) {
+    if (!can_type&& !input_waiting) {
     	pic_send_eoi(1);
 	return;
     }
@@ -309,11 +310,15 @@ void keyboard_handler(void)
     
     if (ch)
     {
-        // Передаём символ в систему команд терминала
-        term_handle_command_input(ch);
+    	if (input_waiting) {
+    		kbd_buffer_push(ch);
+    	} else {
+    		// Передаём символ в систему команд терминала
+        	term_handle_command_input(ch);
         
-        // Также пушим в буфер для совместимости
-        kbd_buffer_push(ch);
+        	// Также пушим в буфер для совместимости
+        	kbd_buffer_push(ch);
+    	}
     }
 
     pic_send_eoi(1);

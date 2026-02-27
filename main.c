@@ -30,6 +30,7 @@ extern char _heap_end;
 
 // Глобальные переменные
 extern void acpi_monitor_power_button(void);
+extern bool input_waiting;
 term_t* term;
 framebuffer_t fb;
 ide_disk_t disks[4];
@@ -73,6 +74,7 @@ void kmain(uint64_t mb2_addr)
     outb(0xA1, 0xFF);
 
     can_type = false;
+    input_waiting = false;
 
     mb2_parse(mb2_addr);
     if(!fb_init(&fb)) {
@@ -87,10 +89,13 @@ void kmain(uint64_t mb2_addr)
     uint64_t total_ram = get_total_memory();
     paging_init(total_ram);
 
-    uint32_t cols = (fb.width - 40) / (FONT_WIDTH + 1);
-    uint32_t rows = (fb.height - 40) / (FONT_HEIGHT + 2);
-    term = term_init(&fb, 20, 20, cols, rows);
+    uint32_t cols = fb.width / (FONT_WIDTH + 1);
+    uint32_t rows = fb.height / (FONT_HEIGHT + 2);
+    term = term_init(&fb, 0, 0, cols, rows);
+    fb_fill_rect(&fb, 0, 0, fb.width, fb.height, term->bg_color);
+    
     term_printf(term, "[TERM] Initialized\n");
+    
 
     scheduler_init();
     term_printf(term, "[SCHEDULER] Initialized\n");
@@ -106,7 +111,7 @@ void kmain(uint64_t mb2_addr)
     if (acpi_init()) {
         term_printf(term, "[ACPI] Found %d CPU(s)\n", acpi_get_cpu_count());
     } else {
-	rsod("ACPI_INIT_FAILED", "ACPI");
+		rsod("ACPI_INIT_FAILED", "ACPI");
     }
 
     term_printf(term, "Initializing disk controllers...\n");
