@@ -57,6 +57,11 @@ typedef struct blockdev {
             uint8_t channel;   /* IDE_CHANNEL_PRIMARY/SECONDARY */
             uint8_t drive;     /* 0=master, 1=slave */
         } ide;
+
+    struct {
+        void *ahci_port;    // <-- указатель на ahci_port_t
+        int   port_num;     // <-- номер порта
+    } ahci;
         
         struct {
             void *ramdisk_data;
@@ -80,7 +85,7 @@ blockdev_t* blockdev_register(const char *name, blockdev_type_t type);
 /* Специальные функции регистрации для конкретных типов устройств */
 void blockdev_register_ide(void *ide_disk, const char *name, 
                           uint8_t channel, uint8_t drive);
-void blockdev_scan_all_disks(void);
+void blockdev_scan_all_disks(int type);
 
 /* Поиск устройства по имени */
 blockdev_t* blockdev_find(const char *name);

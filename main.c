@@ -24,6 +24,7 @@
 #include "base/mem/pmm.h"
 #include "base/mem/paging.h"
 #include "base/term/tio.h"
+#include "drv/disk/ahci.h"
 
 /* символы из link.ld */
 extern char _heap_start;
@@ -146,7 +147,13 @@ void kmain(uint64_t mb2_addr)
     tio_printf("Initializing block device layer...\n");
     blockdev_init();
 
-    blockdev_scan_all_disks();
+    blockdev_scan_all_disks(1);
+
+    if (ahci_init() == 0) {
+	blockdev_scan_all_disks(2);
+    } else {
+	tio_printf("[AHCI] Failed.\n");
+    }
 
     usb_core_init(term);
     ehci_init(term, &pmm);

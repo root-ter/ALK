@@ -2,6 +2,7 @@
 #define TERM_H
 
 #include "../../drv/fb/fb.h"
+#include <stdarg.h>
 
 // Терминал с историей и промптом
 typedef struct {
@@ -79,5 +80,7 @@ void term_clear_prompt(term_t* term);
 void term_redraw_cursor(term_t* term);
 
 char* term_readline(term_t* term, const char* prompt);
+
+void term_vprintf(term_t* term, const char* fmt, va_list args);
 
 #endif

@@ -1,5 +1,6 @@
 #include "blockdev.h"
 #include "../disk/ide.h"
+#include "../disk/ahci.h"
 #include "../../base/mem/mem.h"
 #include "../../libc/string.h"
 #include "../../base/term/tio.h"
@@ -64,6 +65,63 @@ static int ide_write_wrapper(blockdev_t *bdev, uint64_t lba,
 static int ide_flush_wrapper(blockdev_t *bdev) {
     /* IDE автоматически сбрасывает кэш после каждой записи */
     return 0;
+}
+
+static int ahci_read_wrapper(blockdev_t *bdev, uint64_t lba, uint32_t count, void *buffer) {
+    ahci_port_t *port = (ahci_port_t*)bdev->device_data.ahci.ahci_port;
+    if (!port) return -1;
+    
+    int result = ahci_port_read(port, lba, count, buffer);
+    if (result == 0) {
+        bdev->read_count++;
+        return 0;
+    }
+    bdev->error_count++;
+    return -1;
+}
+
+// Обёртка для записи
+static int ahci_write_wrapper(blockdev_t *bdev, uint64_t lba, uint32_t count, const void *buffer) {
+    ahci_port_t *port = (ahci_port_t*)bdev->device_data.ahci.ahci_port;
+    if (!port) return -1;
+    
+    int result = ahci_port_write(port, lba, count, buffer);
+    if (result == 0) {
+        bdev->write_count++;
+        return 0;
+    }
+    bdev->error_count++;
+    return -1;
+}
+
+// Функция регистрации AHCI порта
+void blockdev_register_ahci(ahci_port_t *port, int port_num) {
+    if (!port || port->status != AHCI_PORT_ACTIVE) return;
+    
+    char name[32];
+    snprintf(name, sizeof(name), "sata_%d", port_num);
+    
+    blockdev_t *bdev = blockdev_register(name, BLOCKDEV_TYPE_AHCI);
+    if (!bdev) return;
+    
+    // Заполняем информацию
+    bdev->sector_size = port->sector_size;
+    bdev->total_sectors = port->total_sectors;
+    bdev->total_bytes = port->total_sectors * port->sector_size;
+    bdev->supports_lba48 = port->supports_lba48;
+    bdev->status = BLOCKDEV_READY;
+    
+    // Ставим обработчики
+    bdev->read_sectors = ahci_read_wrapper;
+    bdev->write_sectors = ahci_write_wrapper;
+    bdev->flush_cache = NULL;  // AHCI сам сбрасывает
+    
+    // Сохраняем данные порта
+    bdev->device_data.ahci.ahci_port = port;
+    bdev->device_data.ahci.port_num = port_num;
+    
+    tio_printf("[BLOCKDEV] Registered AHCI port %d as %s (%lu MB)\n", 
+               port_num, name, (unsigned long)(bdev->total_bytes / (1024 * 1024)));
 }
 
 /* Инициализация системы блочных устройств */
@@ -409,23 +467,34 @@ void blockdev_register_ide(void *ide_disk_ptr, const char *name,
 }
 
 /* Автоматическое сканирование и регистрация всех дисков */
-void blockdev_scan_all_disks(void) {
-    tio_printf("[BLOCKDEV] Scanning for all disks...\n");
+void blockdev_scan_all_disks(int type) {
+    tio_printf("[BLOCKDEV] Scanning disks...\n");
     
-    int disk_counter = 1;
-    char dev_name[BLOCKDEV_NAME_LEN];
+    if (type == 1) { // IDE
+    	int disk_counter = 1;
+    	char dev_name[BLOCKDEV_NAME_LEN];
     
-    // 1. IDE диски
-    tio_printf("  Scanning IDE controllers...\n");
-    for (int ch = 0; ch < 2; ch++) {
-        for (int dr = 0; dr < 2; dr++) {
-            int idx = ch * 2 + dr;
-            if (disks[idx].type != IDE_TYPE_NONE) {
-                snprintf(dev_name, sizeof(dev_name), "ide_%d", disk_counter++);
-                blockdev_register_ide(&disks[idx], dev_name, ch, dr);
+    	// 1. IDE диски
+    	tio_printf("  Scanning IDE controllers...\n");
+    	for (int ch = 0; ch < 2; ch++) {
+            for (int dr = 0; dr < 2; dr++) {
+            	int idx = ch * 2 + dr;
+            	if (disks[idx].type != IDE_TYPE_NONE) {
+                    snprintf(dev_name, sizeof(dev_name), "ide_%d", disk_counter++);
+                    blockdev_register_ide(&disks[idx], dev_name, ch, dr);
+                }
             }
-        }
+    	}
     }
-    tio_printf("\n[BLOCKDEV] Scan complete. Found %d devices.\n", 
-                blockdev_count);
+
+    if (type == 2) { // AHCI
+	tio_printf("  Scanning AHCI controllers...\n");
+    	for (int i = 0; i < 32; i++) {
+	    ahci_port_t *port = ahci_get_port(i);
+	    if (port && port->status == AHCI_PORT_ACTIVE) {
+	    	blockdev_register_ahci(port, i);
+	    }
+    	}
+    }
+    tio_printf("\n[BLOCKDEV] Scan complete.\n");
 }

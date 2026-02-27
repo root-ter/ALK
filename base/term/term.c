@@ -1144,3 +1144,9 @@ void term_refresh_prompt(term_t* term) {
         fb_swap_buffers(term->fb);
     }
 }
+
+void term_vprintf(term_t* term, const char* fmt, va_list args) {
+    char buffer[1024];
+    vsnprintf(buffer, sizeof(buffer), fmt, args);  // <- vsprintf, не vsnprintf?
+    term_puts(term, buffer);
+}
