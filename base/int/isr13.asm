@@ -54,4 +54,3 @@ isr13:
     iretq
 
 section .note.GNU-stack
-; empty

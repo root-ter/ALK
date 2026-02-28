@@ -25,6 +25,8 @@
 #include "base/mem/paging.h"
 #include "base/term/tio.h"
 #include "drv/disk/ahci.h"
+#include "fs/vfs/vfs.h"
+#include "fs/exfat/exfat.h"
 
 /* символы из link.ld */
 extern char _heap_start;
@@ -37,6 +39,8 @@ framebuffer_t fb;
 ide_disk_t disks[4];
 pmm_t pmm;
 term_t* term;
+vfs_inode_t *fs_root = NULL;
+blockdev_t *fs_disk = NULL;
 
 void zombie_reaper_task(void)
 {
@@ -62,6 +66,18 @@ void show_alk_logo(term_t* term) {
     mwait(50);
     tio_printf("/__/   |__|______|__| \\_\\  \\____/|____|\n");
     tio_printf("\n");
+}
+
+void fs_init(void) {
+    tio_printf("\n[FS] Initializing filesystem layer...\n");
+    
+    // 1. Инициализируем VFS
+    vfs_init();
+    
+    // 2. Регистрируем exFAT
+    exfat_init();
+    
+    tio_printf("[FS] Ready\n");
 }
 
 /*-------------------------------------------------------------
@@ -157,11 +173,11 @@ void kmain(uint64_t mb2_addr)
 
     usb_core_init(term);
     ehci_init(term, &pmm);
+
+    fs_init();
         
     /* Разрешаем прерывания */
     asm volatile("sti");
-
-    usb_dump_all();
 
     show_alk_logo(term);
     

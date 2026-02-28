@@ -8,32 +8,104 @@
 #include "../time/timer.h"
 #include "../../drv/block/blockdev.h"
 #include "term.h"
+#include "../../fs/vfs/vfs.h"
+#include "../../fs/exfat/exfat.h"
 #include <stddef.h>
 
 extern term_t* term;
+extern vfs_inode_t *fs_root;
+static vfs_inode_t *current_dir = NULL;
+static char current_path[PATH_MAX] = "/";
 
 extern volatile ClockTime system_clock;
+
+static char* build_path_recursive(vfs_inode_t *inode, char *buffer, int depth) {
+    if (!inode || depth > 100) return buffer;
+    
+    // Если это корень
+    if (inode == fs_root) {
+        buffer[0] = '/';
+        buffer[1] = '\0';
+        return buffer;
+    }
+    
+    // Получаем родителя
+    vfs_inode_t *parent = NULL;
+    if (vfs_parent(inode, &parent) != 0) {
+        return buffer;
+    }
+    
+    // Рекурсивно строим путь родителя
+    if (parent != inode) {  // Защита от зацикливания
+        build_path_recursive(parent, buffer, depth + 1);
+    }
+    
+    // Добавляем свое имя
+    char name[256];
+    if (exfat_get_name(inode, name, sizeof(name)) == 0 && name[0] != '\0') {
+        int len = strlen(buffer);
+        if (len > 0 && buffer[len-1] != '/') {
+            strcat(buffer, "/");
+        }
+        strcat(buffer, name);
+    }
+    
+    if (parent && parent != inode && parent != fs_root) {
+        vfs_free_inode(parent);
+    }
+    
+    return buffer;
+}
+
+// Обновить current_path
+static void update_current_path(void) {
+    if (!fs_root || !current_dir) {
+        strcpy(current_path, "/");
+        return;
+    }
+    
+    char temp[PATH_MAX];
+    temp[0] = '\0';
+    
+    if (current_dir == fs_root) {
+        strcpy(current_path, "/");
+    } else {
+        build_path_recursive(current_dir, temp, 0);
+        if (temp[0] == '\0') {
+            strcpy(current_path, "/");
+        } else {
+            strcpy(current_path, temp);
+        }
+    }
+}
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 static void cmd_help(void) {
     tio_printf("Available commands:\n");
-    tio_printf("  help            - Show this help\n");
-    tio_printf("  clear           - Clear screen\n");
-    tio_printf("  ps              - List processes\n");
-    tio_printf("  ps -l           - Detailed process list\n");
-    tio_printf("  time            - Show current time\n");
-    tio_printf("  reboot          - Reboot system\n");
-    tio_printf("  shutdown        - Shutdown system\n");
-    tio_printf("  meminfo         - Show memory information\n");
-    tio_printf("  version         - Show kernel version\n");
-    tio_printf("  echo <text>     - Echo text\n");
-    tio_printf("  kill <pid>      - Kill process by PID\n");
-    tio_printf("  tasks           - Show task list\n");
-    tio_printf("  disklist        - Show disk list\n");
-    tio_printf("  diskinfo <disk> - Show disk info\n");
-    tio_printf("  diskread <disk> <lba> <count> - Read disk\n");
-    tio_printf("  alk             - Show ALK version\n");
+    tio_printf("  help                | cd\n");
+    tio_printf("  clear               | pwd\n");
+    tio_printf("  ps                  |\n");
+    tio_printf("  ps -l               |\n");
+    tio_printf("  time                |\n");
+    tio_printf("  reboot              |\n");
+    tio_printf("  shutdown            |\n");
+    tio_printf("  meminfo             |\n");
+    tio_printf("  version             |\n");
+    tio_printf("  echo <text>         |\n");
+    tio_printf("  kill <pid>          |\n");
+    tio_printf("  tasks               |\n");
+    tio_printf("  disklist            |\n");
+    tio_printf("  diskinfo <disk>     |\n");
+    tio_printf("  diskread <disk> <lba> <count> |\n");
+    tio_printf("  alk                 |\n");
+    tio_printf("  cat <file>          |\n");
+    tio_printf("  mount [num]         |\n");
+    tio_printf("  exformat <num>      |\n");
+    tio_printf("  touch <file>        |\n");
+    tio_printf("  mkdir <dir>         |\n");
+    tio_printf("  rm <path>           |\n");
+    tio_printf("  write <file> <text> |\n");
 }
 
 static void cmd_clear(void) {
@@ -391,6 +463,415 @@ void cmd_alk(void) {
     tio_printf("\nWe hope you have a good experience by using ALK :)\n");
 }
 
+static void cmd_mount(char *args) {
+    blockdev_t *disks[16];
+    int count = blockdev_get_list(disks, 16);
+    
+    if (count == 0) {
+        tio_printf("No disks available\n");
+        return;
+    }
+    
+    // Если аргумент не указан - показываем список
+    if (!args || args[0] == '\0') {
+        tio_printf("Available disks:\n");
+        for (int i = 0; i < count; i++) {
+            char size_str[32];
+            uint64_t size_mb = disks[i]->total_bytes / (1024 * 1024);
+            snprintf(size_str, sizeof(size_str), "%luMB", size_mb);
+            
+            tio_printf("  %d: %s [%s] - %s\n", 
+                       i + 1, disks[i]->name, size_str,
+                       disks[i]->type == BLOCKDEV_TYPE_AHCI ? "SATA" : "IDE");
+        }
+        tio_printf("Usage: mount <number>\n");
+        return;
+    }
+    
+    // Парсим номер диска
+    int disk_num = atoi(args);
+    if (disk_num < 1 || disk_num > count) {
+        tio_printf("Invalid disk number\n");
+        return;
+    }
+    
+    blockdev_t *disk = disks[disk_num - 1];
+    tio_printf("Mounting %s...\n", disk->name);
+    
+    // Пробуем exFAT
+    vfs_inode_t *root;
+    if (vfs_mount("exfat", disk, &root) == 0) {
+        if (fs_root) {
+            // Размонтируем старую ФС
+            vfs_unmount(fs_root);
+        }
+        fs_root = root;
+	current_dir = fs_root;
+        strcpy(current_path, "/");
+        tio_printf("Mounted %s as exFAT\n", disk->name);
+    } else {
+        tio_printf("Failed to mount %s (not exFAT?)\n", disk->name);
+    }
+}
+
+static void cmd_cat(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: cat <filename>\n");
+        return;
+    }
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    vfs_file_t *file;
+    if (vfs_open(current_dir, args, O_READ, &file) == 0) {
+        char buffer[512];
+        uint32_t read;
+        while (vfs_read(file, buffer, 512, &read) == 0 && read > 0) {
+            for (uint32_t i = 0; i < read; i++) {
+                term_putc(term, buffer[i]);
+            }
+        }
+        tio_printf("\n");
+        vfs_close(file);
+    } else {
+        tio_printf("File not found: %s\n", args);
+    }
+}
+
+static void cmd_exformat(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: exformat <disk_number>\n");
+        tio_printf("WARNING: This will erase ALL data on the disk!\n");
+        return;
+    }
+    
+    // Получаем список дисков
+    blockdev_t *disks[16];
+    int count = blockdev_get_list(disks, 16);
+    
+    int disk_num = atoi(args);
+    if (disk_num < 1 || disk_num > count) {
+        tio_printf("Invalid disk number\n");
+        return;
+    }
+    
+    blockdev_t *disk = disks[disk_num - 1];
+    
+    tio_printf("Formatting %s as exFAT...\n", disk->name);
+    
+    // Вызываем функцию форматирования
+    if (exfat_format(disk) == 0) {
+        tio_printf("Format successful!\n");
+        
+        // Автоматически монтируем после форматирования
+        vfs_inode_t *root;
+        if (vfs_mount("exfat", disk, &root) == 0) {
+            if (fs_root) vfs_unmount(fs_root);
+            fs_root = root;
+            tio_printf("Mounted %s\n", disk->name);
+        }
+    } else {
+        tio_printf("Format failed!\n");
+    }
+}
+
+static void cmd_touch(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: touch <filename>\n");
+        return;
+    }
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    vfs_inode_t *inode;
+    if (vfs_create(current_dir, args, FT_REG_FILE, &inode) == 0) {
+        tio_printf("File created: %s\n", args);
+    } else {
+        tio_printf("Failed to create file: %s\n", args);
+    }
+}
+
+// Создание директории
+static void cmd_mkdir(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: mkdir <dirname>\n");
+        return;
+    }
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    vfs_inode_t *new_dir;
+    if (vfs_mkdir(current_dir, args, FT_DIR, &new_dir) == 0) {
+        tio_printf("Directory created: %s\n", args);
+        vfs_free_inode(new_dir);  // Освобождаем, если не нужен
+    } else {
+        tio_printf("Failed to create directory: %s\n", args);
+    }
+}
+// Удаление файла или директории
+static void cmd_rm(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: rm <path>\n");
+        return;
+    }
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    if (vfs_unlink(current_dir, args) == 0) {
+        tio_printf("Removed: %s\n", args);
+    } else {
+        tio_printf("Failed to remove: %s\n", args);
+    }
+}
+
+// Запись в файл (создает или перезаписывает)
+static void cmd_write(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: write <filename> <text>\n");
+        return;
+    }
+    
+    // Парсим аргументы: первое слово - имя файла, остальное - текст
+    char filename[256];
+    char text[256];
+    char *space = strchr(args, ' ');
+    
+    if (!space) {
+        tio_printf("Usage: write <filename> <text>\n");
+        return;
+    }
+    
+    int name_len = space - args;
+    if (name_len >= 256) name_len = 255;
+    memcpy(filename, args, name_len);
+    filename[name_len] = '\0';
+    
+    strcpy(text, space + 1);
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    // Открываем файл для записи (создаем если нет)
+    vfs_file_t *file;
+    if (vfs_open(current_dir, filename, O_WRITE | O_CREAT, &file) == 0) {
+        uint32_t written;
+        if (vfs_write(file, text, strlen(text), &written) == 0) {
+            tio_printf("Written %d bytes to %s\n", written, filename);
+        } else {
+            tio_printf("Write failed\n");
+        }
+        vfs_close(file);
+    } else {
+        tio_printf("Failed to open %s\n", filename);
+    }
+}
+
+static void cmd_ls(char *args) {
+    vfs_inode_t *target_dir;
+    char *path = args;
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    // Если путь не указан, используем текущую директорию
+    if (!path || path[0] == '\0') {
+        target_dir = current_dir;
+    } else {
+        // Убираем ведущие пробелы
+        while (*path == ' ') path++;
+        
+        vfs_inode_t *new_dir = NULL;
+        
+        // Обрабатываем путь
+        if (path[0] == '/') {
+            if (vfs_walk(fs_root, path, &new_dir) != 0) {
+                tio_printf("ls: %s: No such file or directory\n", path);
+                return;
+            }
+        } else {
+            if (vfs_walk(current_dir, path, &new_dir) != 0) {
+                tio_printf("ls: %s: No such file or directory\n", path);
+                return;
+            }
+        }
+        
+        if (new_dir->i_mode != FT_DIR) {
+            tio_printf("ls: %s: Not a directory\n", path);
+            vfs_free_inode(new_dir);
+            return;
+        }
+        target_dir = new_dir;
+    }
+    
+    // Показываем путь
+    if (target_dir == fs_root) {
+        tio_printf("\nContents of /:\n");
+    } else if (target_dir == current_dir && (!args || args[0] == '\0')) {
+        tio_printf("\nContents of %s:\n", current_path);
+    } else {
+        tio_printf("\nContents of %s:\n", path);
+    }
+    
+    tio_printf("%-4s %-30s %s\n", "Type", "Name", "Size");
+    tio_printf("---- ------------------------------ ----------\n");
+    
+    uint64_t pos = 0;
+    char name[256];
+    uint32_t name_len;
+    uint32_t type;
+    int count = 0;
+    
+    while (vfs_readdir(target_dir, &pos, name, &name_len, &type) == 0) {
+        char type_char = (type == FT_DIR) ? 'D' : 'F';
+        
+        if (type == FT_REG_FILE) {
+            vfs_inode_t *file_inode = NULL;
+            if (vfs_lookup(target_dir, name, &file_inode) == 0) {
+                tio_printf("[%c]   %-30s %lu bytes\n", 
+                           type_char, name, (unsigned long)file_inode->i_size);
+                vfs_free_inode(file_inode);
+            } else {
+                tio_printf("[%c]   %-30s\n", type_char, name);
+            }
+        } else {
+            tio_printf("[%c]   %-30s\n", type_char, name);
+        }
+        count++;
+    }
+    
+    if (count == 0) {
+        tio_printf("  (empty directory)\n");
+    }
+    tio_printf("\nTotal: %d items\n", count);
+    
+    // Освобождаем если это временная директория
+    if (target_dir != current_dir && target_dir != fs_root) {
+        vfs_free_inode(target_dir);
+    }
+}
+
+static void cmd_rmdir(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: rmdir <dirname>\n");
+        return;
+    }
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    // Пытаемся удалить директорию
+    if (vfs_rmdir(fs_root, args) == 0) {
+        tio_printf("Directory removed: %s\n", args);
+    } else {
+        tio_printf("Failed to remove directory: %s (not empty or not a directory)\n", args);
+    }
+}
+
+static void cmd_cd(char *args) {
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    vfs_inode_t *new_dir;
+    
+    // Если аргументов нет, переходим в корень
+    if (!args || args[0] == '\0') {
+        new_dir = fs_root;
+    } else {
+        // Убираем пробелы
+        while (*args == ' ') args++;
+        
+        // Обрабатываем путь
+        if (args[0] == '/') {
+            // Абсолютный путь
+            if (vfs_walk(fs_root, args + 1, &new_dir) != 0) {
+                tio_printf("cd: %s: No such directory\n", args);
+                return;
+            }
+        } else if (strcmp(args, "..") == 0) {
+            // Переход на уровень вверх
+            if (current_dir == fs_root) {
+                new_dir = fs_root;
+            } else {
+                if (vfs_parent(current_dir, &new_dir) != 0) {
+                    tio_printf("cd: ..: Cannot get parent\n");
+                    return;
+                }
+            }
+        } else {
+            // Относительный путь
+            char full_path[PATH_MAX];
+            if (current_dir == fs_root) {
+                if (snprintf(full_path, sizeof(full_path), "/%s", args) >= (int)sizeof(full_path)) {
+                    tio_printf("cd: Path too long\n");
+                    return;
+                }
+            } else {
+                // Получаем полный путь через рекурсию
+                char current_path_copy[PATH_MAX];
+                strcpy(current_path_copy, current_path);
+                
+                if (current_path_copy[strlen(current_path_copy)-1] == '/') {
+                    snprintf(full_path, sizeof(full_path), "%s%s", current_path_copy, args);
+                } else {
+                    snprintf(full_path, sizeof(full_path), "%s/%s", current_path_copy, args);
+                }
+            }
+            
+            if (vfs_walk(fs_root, full_path + 1, &new_dir) != 0) {
+                tio_printf("cd: %s: No such directory\n", args);
+                return;
+            }
+        }
+    }
+    
+    // Проверяем, что это директория
+    if (new_dir->i_mode != FT_DIR) {
+        tio_printf("cd: %s: Not a directory\n", args);
+        if (new_dir != fs_root) vfs_free_inode(new_dir);
+        return;
+    }
+    
+    // Освобождаем старую директорию
+    if (current_dir && current_dir != fs_root) {
+        vfs_free_inode(current_dir);
+    }
+    
+    current_dir = new_dir;
+    update_current_path();
+    
+    // Показываем новый путь
+    tio_printf("%s\n", current_path);
+}
+
+static void cmd_pwd(void) {
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    tio_printf("%s\n", current_path);
+}
+
 // ==================== ОСНОВНАЯ ФУНКЦИЯ ОБРАБОТКИ КОМАНД ====================
 
 int term_execute_command(char* cmdline) {
@@ -449,6 +930,28 @@ int term_execute_command(char* cmdline) {
     	cmd_diskinfo(args);
     } else if (strcmp(cmd, "diskread") == 0) {
     	cmd_diskread(args); 
+    } else if (strcmp(cmd, "mount") == 0) {
+        cmd_mount(args);
+    } else if (strcmp(cmd, "exformat") == 0) {
+        cmd_exformat(args);
+    } else if (strcmp(cmd, "cat") == 0) {
+        cmd_cat(args);
+    } else if (strcmp(cmd, "ls") == 0) {
+	cmd_ls(args);
+    } else if (strcmp(cmd, "rmdir") == 0) {
+	cmd_rmdir(args);
+    } else if (strcmp(cmd, "write") == 0) {
+	cmd_write(args);
+    } else if (strcmp(cmd, "rm") == 0) {
+	cmd_rm(args);
+    } else if (strcmp(cmd, "mkdir") == 0) {
+	cmd_mkdir(args);
+    } else if (strcmp(cmd, "touch") == 0) {
+	cmd_touch(args);
+    } else if (strcmp(cmd, "cd") == 0) {
+	cmd_cd(args);
+    } else if (strcmp(cmd, "pwd") == 0) {
+	cmd_pwd();
     } else if (strcmp(cmd, "alk") == 0) {
         cmd_alk();
     } else {
