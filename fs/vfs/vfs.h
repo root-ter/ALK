@@ -109,6 +109,13 @@ typedef struct vfs_stat {
     uint32_t st_nlink;
 } vfs_stat_t;
 
+
+typedef struct {
+    char name[256];
+    vfs_inode_t *inode;
+    int type;
+} mount_entry_t;
+
 // ==================== API ДЛЯ ЯДРА ====================
 
 // Инициализация VFS
@@ -156,5 +163,12 @@ vfs_inode_t *vfs_alloc_inode(void);
 void vfs_free_inode(vfs_inode_t *inode);
 
 int vfs_parent(vfs_inode_t *inode, vfs_inode_t **parent);
+
+// Создать точку монтирования
+int vfs_mount_point(const char *path, vfs_inode_t *inode);
+
+int build_current_path(vfs_inode_t *dir, const char *component, char *out);
+
+int vfs_get_mount_points(const char *path, mount_entry_t *entries, int max_entries);
 
 #endif

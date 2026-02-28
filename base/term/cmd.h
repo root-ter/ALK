@@ -2,6 +2,7 @@
 #define TERM_CMDS_H
 
 #include <stdint.h>
+#include "../../fs/vfs/vfs.h"
 
 // Выполнить команду
 int term_execute_command(char* cmdline);
@@ -11,5 +12,8 @@ int term_execute_command(char* cmdline);
 
 // Обработка ввода команд (для использования в обработчике клавиатуры)
 void term_handle_command_input(char input_char);
+
+// Для VFS
+char* build_path_recursive(vfs_inode_t *inode, char *buffer, int depth);
 
 #endif

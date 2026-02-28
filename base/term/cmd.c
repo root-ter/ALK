@@ -10,6 +10,7 @@
 #include "term.h"
 #include "../../fs/vfs/vfs.h"
 #include "../../fs/exfat/exfat.h"
+#include "../elfload/elfload.h"
 #include <stddef.h>
 
 extern term_t* term;
@@ -19,7 +20,7 @@ static char current_path[PATH_MAX] = "/";
 
 extern volatile ClockTime system_clock;
 
-static char* build_path_recursive(vfs_inode_t *inode, char *buffer, int depth) {
+char* build_path_recursive(vfs_inode_t *inode, char *buffer, int depth) {
     if (!inode || depth > 100) return buffer;
     
     // Если это корень
@@ -872,6 +873,64 @@ static void cmd_pwd(void) {
     tio_printf("%s\n", current_path);
 }
 
+static void cmd_exec(char *args) {
+    if (!args || args[0] == '\0') {
+        tio_printf("Usage: exec <program> [args...]\n");
+        return;
+    }
+    
+    if (!fs_root) {
+        tio_printf("No filesystem mounted\n");
+        return;
+    }
+    
+    // Простой парсинг аргументов
+    char *argv[16];
+    int argc = 0;
+    char *p = args;
+    char *start;
+    
+    while (*p && argc < 15) {
+        // Пропускаем пробелы
+        while (*p == ' ') p++;
+        if (*p == '\0') break;
+        
+        start = p;
+        while (*p && *p != ' ') p++;
+        
+        if (*p) {
+            *p = '\0';
+            p++;
+        }
+        
+        argv[argc++] = start;
+    }
+    argv[argc] = NULL;
+    
+    // Открываем файл
+    vfs_file_t *file;
+    if (vfs_open(current_dir, argv[0], O_READ, &file) != 0) {
+        tio_printf("exec: %s: not found\n", argv[0]);
+        return;
+    }
+    
+    // Проверяем, что это ELF
+    if (elf_check(file) != 0) {
+        tio_printf("exec: %s: not an ELF file\n", argv[0]);
+        vfs_close(file);
+        return;
+    }
+    
+    // Загружаем и запускаем
+    int pid = elf_load_and_exec(file, argv[0], argc, argv);
+    
+    if (pid > 0) {
+        tio_printf("[%d]\n", pid);
+    } else {
+        tio_printf("exec: %s: failed to load\n", argv[0]);
+    }
+}
+
 // ==================== ОСНОВНАЯ ФУНКЦИЯ ОБРАБОТКИ КОМАНД ====================
 
 int term_execute_command(char* cmdline) {
@@ -952,6 +1011,8 @@ int term_execute_command(char* cmdline) {
 	cmd_cd(args);
     } else if (strcmp(cmd, "pwd") == 0) {
 	cmd_pwd();
+    } else if (strcmp(cmd, "exec") == 0) {
+	cmd_exec(args);
     } else if (strcmp(cmd, "alk") == 0) {
         cmd_alk();
     } else {

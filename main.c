@@ -27,6 +27,7 @@
 #include "drv/disk/ahci.h"
 #include "fs/vfs/vfs.h"
 #include "fs/exfat/exfat.h"
+#include "fs/devfs/devfs.h"
 
 /* символы из link.ld */
 extern char _heap_start;
@@ -175,6 +176,7 @@ void kmain(uint64_t mb2_addr)
     ehci_init(term, &pmm);
 
     fs_init();
+    devfs_init();
         
     /* Разрешаем прерывания */
     asm volatile("sti");

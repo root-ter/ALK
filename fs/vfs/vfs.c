@@ -2,10 +2,18 @@
 #include "../../base/mem/mem.h"
 #include "../../libc/string.h"
 #include "../../base/term/tio.h"
+#include "../../base/term/cmd.h"
+
+typedef struct mount_point {
+    char path[PATH_MAX];
+    vfs_inode_t *inode;
+    struct mount_point *next;
+} mount_point_t;
 
 // Глобальные переменные
 static file_system_t *fs_list = NULL;
 static vfs_inode_t *root_inode = NULL;
+static mount_point_t *mounts = NULL;
 
 // Простейший аллокатор инодов (в реальности нужно кэширование)
 static uint64_t next_ino = 1;
@@ -15,6 +23,87 @@ void vfs_init(void) {
     root_inode = NULL;
     next_ino = 1;
     tio_printf("[VFS] Initialized\n");
+}
+
+int vfs_mount_point(const char *path, vfs_inode_t *inode) {
+    mount_point_t *mp = (mount_point_t*)malloc(sizeof(mount_point_t));
+    if (!mp) return -1;  // <-- ЭТО ВАЖНО!
+    
+    strcpy(mp->path, path);
+    mp->inode = inode;
+    mp->next = mounts;
+    mounts = mp;
+    return 0;
+}
+
+int build_current_path(vfs_inode_t *dir, const char *component, char *out) {
+    if (!dir || !out) return -1;
+    
+    char base_path[PATH_MAX];
+    
+    // Строим путь до текущей директории
+    if (build_path_recursive(dir, base_path, 0) != 0) {
+        return -1;
+    }
+    
+    // Если компонент не указан, возвращаем путь к директории
+    if (!component || component[0] == '\0') {
+        strcpy(out, base_path);
+        return 0;
+    }
+    
+    // Добавляем компонент к пути с проверкой длины
+    int base_len = strlen(base_path);
+    int comp_len = strlen(component);
+    
+    // Проверяем, что не выйдем за пределы
+    if (base_len + comp_len + 2 > PATH_MAX) {
+        return -1;  // Путь слишком длинный
+    }
+    
+    if (base_len > 0 && base_path[base_len-1] == '/') {
+        snprintf(out, PATH_MAX, "%s%s", base_path, component);
+    } else {
+        snprintf(out, PATH_MAX, "%s/%s", base_path, component);
+    }
+    
+    return 0;
+}
+
+static int get_parent_inode(vfs_inode_t *inode, vfs_inode_t **parent) {
+    if (!inode || !parent) return -1;
+    
+    // Если это корень
+    if (inode == root_inode) {
+        *parent = root_inode;
+        return 0;
+    }
+    
+    // Используем операцию parent из ФС
+    if (inode->i_op && inode->i_op->parent) {
+        return inode->i_op->parent(inode, parent);
+    }
+    
+    return -1;
+}
+
+static vfs_inode_t *check_mount_points(const char *path) {
+    tio_printf("[VFS] Checking mount points for '%s'\n", path);
+    
+    mount_point_t *mp = mounts;
+    int found = 0;
+    
+    while (mp) {
+        tio_printf("[VFS] Mount point: '%s' -> inode %p\n", mp->path, mp->inode);
+        if (strcmp(mp->path, path) == 0) {
+            tio_printf("[VFS] Found match!\n");
+            return mp->inode;
+        }
+        mp = mp->next;
+    }
+    
+    tio_printf("[VFS] No mount point found for '%s'\n", path);
+    return NULL;
 }
 
 int vfs_register_fs(file_system_t *fs) {
@@ -74,19 +163,50 @@ static int split_path(const char *path, char *name, const char **rest) {
     return 0;
 }
 
-// Обход пути
+// Обход пути с поддержкой точек монтирования
 int vfs_walk(vfs_inode_t *dir, const char *path, vfs_inode_t **result) {
     if (!dir || !path || !result) return -1;
     
     // Пустой путь или корень
     if (path[0] == '\0' || (path[0] == '/' && path[1] == '\0')) {
-        *result = dir;
+        // Проверяем, не является ли текущая директория точкой монтирования
+        vfs_inode_t *mount_point = check_mount_points("/");
+        if (mount_point) {
+            *result = mount_point;
+        } else {
+            *result = dir;
+        }
         return 0;
     }
     
     // Абсолютный путь начинается с корня
     if (path[0] == '/') {
-        if (!root_inode) return -1;
+    	if (!root_inode) return -1;
+    
+    	// Проверяем, не является ли путь точкой монтирования
+    	vfs_inode_t *mount_point = check_mount_points(path);
+    	if (mount_point) {
+            *result = mount_point;
+            return 0;
+    	}
+    
+    	// Проверяем, не является ли первый компонент точкой монтирования
+    	char first_component[256];
+    	const char *rest;
+    	if (split_path(path + 1, first_component, &rest) == 0) {
+            char mount_path[PATH_MAX];
+            snprintf(mount_path, sizeof(mount_path), "/%s", first_component);
+        
+            mount_point = check_mount_points(mount_path);
+            if (mount_point) {
+            	if (!rest) {
+                    *result = mount_point;
+                    return 0;
+            	}
+                return vfs_walk(mount_point, rest, result);
+            }
+    	}
+    
         return vfs_walk(root_inode, path + 1, result);
     }
     
@@ -107,12 +227,16 @@ int vfs_walk(vfs_inode_t *dir, const char *path, vfs_inode_t **result) {
     
     // Поднимаемся наверх
     if (strcmp(component, "..") == 0) {
-        // TODO: lookup parent
+        vfs_inode_t *parent;
+        if (get_parent_inode(dir, &parent) != 0) {
+            return -1;
+        }
+        
         if (!rest) {
-            *result = dir;  // FIXME: должен быть parent
+            *result = parent;
             return 0;
         }
-        return vfs_walk(dir, rest, result);  // FIXME
+        return vfs_walk(parent, rest, result);
     }
     
     // Ищем компонент в текущей директории
@@ -123,13 +247,28 @@ int vfs_walk(vfs_inode_t *dir, const char *path, vfs_inode_t **result) {
         return -1;  // Not found
     }
     
+    // Формируем текущий путь для проверки точки монтирования
+    char current_path[PATH_MAX];
+    if (build_current_path(dir, component, current_path) == 0) {
+        // Проверяем, не является ли этот путь точкой монтирования
+        vfs_inode_t *mount_point = check_mount_points(current_path);
+        if (mount_point) {
+            // Если это точка монтирования, подменяем инод
+            vfs_free_inode(next);
+            next = mount_point;
+        }
+    }
+    
     if (!rest) {
         *result = next;
         return 0;
     }
     
     // Должна быть директория для продолжения пути
-    if (next->i_mode != FT_DIR) return -1;
+    if (next->i_mode != FT_DIR) {
+        vfs_free_inode(next);
+        return -1;
+    }
     
     return vfs_walk(next, rest, result);
 }
@@ -290,7 +429,6 @@ int vfs_rmdir(vfs_inode_t *dir, const char *name) {
 
 int vfs_readdir(vfs_inode_t *dir, uint64_t *pos, char *name, 
                 uint32_t *name_len, uint32_t *type) {
-    // Проверка аргументов
     if (!dir || !pos || !name || !name_len || !type) {
         return -1;
     }
@@ -300,12 +438,51 @@ int vfs_readdir(vfs_inode_t *dir, uint64_t *pos, char *name,
         return -1;
     }
     
-    // Проверяем, что операция readdir поддерживается
+    // Особый случай: корневая директория VFS
+    if (dir == root_inode) {
+        // Сначала показываем точки монтирования
+        static mount_entry_t mount_entries[32];
+        static int mount_count = -1;
+        static int mount_index = 0;
+        
+        if (*pos == 0) {
+            // Обновляем список точек монтирования
+            mount_count = vfs_get_mount_points("/", mount_entries, 32);
+            mount_index = 0;
+        }
+        
+        // Показываем точки монтирования
+        while (mount_index < mount_count) {
+            if (mount_index == *pos) {
+                strcpy(name, mount_entries[mount_index].name);
+                *name_len = strlen(name);
+                *type = mount_entries[mount_index].type;
+                (*pos)++;
+                mount_index++;
+                return 0;
+            }
+            mount_index++;
+        }
+        
+        // После точек монтирования показываем содержимое реальной ФС
+        if (dir->i_op && dir->i_op->readdir) {
+            // Корректируем позицию для ФС
+            uint64_t fs_pos = *pos - mount_count;
+            int ret = dir->i_op->readdir(dir, &fs_pos, name, name_len, type);
+            if (ret == 0) {
+                *pos = fs_pos + mount_count;
+            }
+            return ret;
+        }
+        
+        return -1;
+    }
+    
+    // Для остальных директорий - обычное поведение
     if (!dir->i_op || !dir->i_op->readdir) {
         return -1;
     }
     
-    // Вызываем реализацию конкретной ФС
     return dir->i_op->readdir(dir, pos, name, name_len, type);
 }
 
@@ -393,4 +570,43 @@ int vfs_parent(vfs_inode_t *inode, vfs_inode_t **parent) {
     }
     
     return -1;
+}
+
+int vfs_get_mount_points(const char *path, mount_entry_t *entries, int max_entries) {
+    if (!path || !entries || max_entries <= 0) return -1;
+    
+    int count = 0;
+    mount_point_t *mp = mounts;
+    size_t path_len = strlen(path);
+    
+    while (mp && count < max_entries) {
+        // Проверяем, находится ли точка монтирования непосредственно в этом пути
+        if (strncmp(mp->path, path, path_len) == 0) {
+            // Пропускаем сам путь
+            if (strcmp(mp->path, path) == 0) {
+                mp = mp->next;
+                continue;
+            }
+            
+            // Получаем следующий компонент после path
+            const char *rest = mp->path + path_len;
+            if (*rest == '/') rest++;
+            
+            // Находим первый компонент имени
+            const char *end = rest;
+            while (*end && *end != '/') end++;
+            
+            int name_len = end - rest;
+            if (name_len > 0 && name_len < 256) {
+                strncpy(entries[count].name, rest, name_len);
+                entries[count].name[name_len] = '\0';
+                entries[count].inode = mp->inode;
+                entries[count].type = FT_DIR;  // Точки монтирования - всегда директории
+                count++;
+            }
+        }
+        mp = mp->next;
+    }
+    
+    return count;
 }
