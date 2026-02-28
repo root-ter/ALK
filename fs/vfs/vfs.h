@@ -44,6 +44,7 @@ typedef struct vfs_operations {
     int (*readdir)(struct vfs_inode *dir, uint64_t *pos, char *name, 
                    uint32_t *name_len, uint32_t *type);
     int (*parent)(struct vfs_inode *inode, struct vfs_inode **parent);
+    int (*get_name)(struct vfs_inode *inode, char *name, int max_len);
 } vfs_operations_t;
 
 // Операции с открытыми файлами (данные)

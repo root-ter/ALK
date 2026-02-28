@@ -20,6 +20,23 @@ static char current_path[PATH_MAX] = "/";
 
 extern volatile ClockTime system_clock;
 
+static int get_inode_name(vfs_inode_t *inode, char *name, int max_len) {
+    if (!inode || !name) return -1;
+    
+    // Для корня
+    if (inode == fs_root) {
+        strcpy(name, "");
+        return 0;
+    }
+    
+    // Пробуем получить имя через VFS
+    if (inode->i_op && inode->i_op->get_name) {
+        return inode->i_op->get_name(inode, name, max_len);
+    }
+    
+    return -1;
+}
+
 char* build_path_recursive(vfs_inode_t *inode, char *buffer, int depth) {
     if (!inode || depth > 100) return buffer;
     
@@ -37,13 +54,13 @@ char* build_path_recursive(vfs_inode_t *inode, char *buffer, int depth) {
     }
     
     // Рекурсивно строим путь родителя
-    if (parent != inode) {  // Защита от зацикливания
+    if (parent != inode) {
         build_path_recursive(parent, buffer, depth + 1);
     }
     
-    // Добавляем свое имя
+    // Добавляем свое имя через универсальную функцию
     char name[256];
-    if (exfat_get_name(inode, name, sizeof(name)) == 0 && name[0] != '\0') {
+    if (get_inode_name(inode, name, sizeof(name)) == 0 && name[0] != '\0') {
         int len = strlen(buffer);
         if (len > 0 && buffer[len-1] != '/') {
             strcat(buffer, "/");
