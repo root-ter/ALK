@@ -42,6 +42,70 @@ pmm_t pmm;
 term_t* term;
 vfs_inode_t *fs_root = NULL;
 blockdev_t *fs_disk = NULL;
+int term_pid = 0;
+
+static void terminal_thread(void);
+
+static void termsaver_recovery(void) {
+    // waiting 10 sec
+    wait(10);
+    task_create(terminal_thread, KSTACK_SIZE * 2, "ALKShell");
+    task_exit(1);
+}
+
+static void termsaver(void) {
+    while (task_is_alive(term_pid)) {
+        asm volatile ("hlt");
+    }
+    // Terminal is terminated
+    while (!task_is_alive(term_pid)) {
+        fb_fill_rect(&fb, 
+                 term->x, term->y,
+                 term->cols * term->char_width,
+                 term->rows * term->char_height,
+                 COLOR_BLACK);
+        fb_set_color(&fb, COLOR_RED, COLOR_BLACK);
+        fb_printf(&fb, "TERMINAL WAS TERMINATED!\n");
+        fb_printf(&fb, "TRYING TO RECOVERY...\n");
+
+        task_create(termsaver_recovery, 0, "RECOVERY");
+        
+        mwait(50);
+
+        fb_fill_rect(&fb, 
+                 term->x, term->y,
+                 term->cols * term->char_width,
+                 term->rows * term->char_height,
+                 COLOR_RED);
+        fb_set_color(&fb, COLOR_BLACK, COLOR_RED);
+        fb_printf(&fb, "TERMINAL WAS TERMINATED!\n");
+        fb_printf(&fb, "TRYING TO RECOVERY...\n");
+    }
+}
+
+static void terminal_thread(void) {
+
+    term_clear(term);
+
+    term_pid = get_current_task()->pid;
+    
+    tio_printf("\n[TERM] Terminal started (PID: %d)\n", 
+               term_pid);
+    
+    // Включаем промпт
+    term_enable_prompt(term);
+    term_set_prompt_text(term, "> ");
+    
+    // Бесконечный цикл терминала
+    while (1) {
+        // Обрабатываем ввод из буфера
+        term_process_input(term);
+        
+        // Небольшая пауза, чтобы не грузить CPU
+        asm volatile("pause");
+        // или mwait(1); если есть
+    }
+}
 
 void zombie_reaper_task(void)
 {
@@ -52,7 +116,7 @@ void zombie_reaper_task(void)
     }
 }
  
-void show_alk_logo(term_t* term) {
+void show_alk_logo(void) {
     tio_printf("\n");
     tio_printf("\n");
     tio_printf("     _____ __     __   __   ____  ____\n");
@@ -111,6 +175,8 @@ void kmain(uint64_t mb2_addr)
     fb_alloc_backbuffer(&fb);
     fb_enable_vsync(&fb, 60);
 
+    scheduler_init();
+
     uint32_t cols = fb.width / (FONT_WIDTH + 1);
     uint32_t rows = fb.height / (FONT_HEIGHT + 2);
     term = term_init(&fb, 0, 0, cols, rows);
@@ -118,16 +184,15 @@ void kmain(uint64_t mb2_addr)
     fb_fill_rect(&fb, 0, 0, fb.width, fb.height, term->bg_color);
     
     tio_printf("[TERM] Initialized\n");
-    
-
-    scheduler_init();
-    tio_printf("[SCHEDULER] Initialized\n");
 
     task_create(zombie_reaper_task, 0, "ZombieReap");
     tio_printf("[SCHEDULER] Created task: 'ZombieReap'\n");
 
+    task_create(terminal_thread, KSTACK_SIZE * 2, "ALKShell");
+    task_create(termsaver, 0, "ShellSave");
+
     pci_init();
-    term_printf(term, "[PCI] Initialized\n");
+    tio_printf("[PCI] Initialized\n");
 
     pc_speaker_init();
 
@@ -136,8 +201,6 @@ void kmain(uint64_t mb2_addr)
     } else {
 	rsod("ACPI_INIT_FAILED", "ACPI");
     }
-
-    task_create(acpi_monitor_power_button, 0, "Pwr");
 
     tio_printf("Initializing disk controllers...\n");
 
@@ -181,11 +244,12 @@ void kmain(uint64_t mb2_addr)
     /* Разрешаем прерывания */
     asm volatile("sti");
 
-    show_alk_logo(term);
+    mwait(200);
+    term_clear(term);
+    show_alk_logo();
     
     can_type = true;
-    term_enable_prompt(term);
-    term_set_prompt_text(term, "> ");
+
     for (;;)
     {
         asm volatile("hlt");

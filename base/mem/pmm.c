@@ -184,7 +184,7 @@ void* pmm_alloc_page(pmm_t* pmm) {
         }
     }
     
-    tio_printf("[PMM] OUT OF MEMORY!\n");
+    tio_printerr("[PMM] OUT OF MEMORY!\n");
     return NULL;
 }
 

@@ -130,7 +130,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     // 1. Get first 8 bytes of device descriptor (to get max packet size)
     uint8_t temp_desc[8];
     if (usb_get_descriptor(dev, USB_DESC_DEVICE, 0, temp_desc, 8) < 0) {
-        tio_printf("[USB] Failed to get device descriptor\n");
+        tio_printerr("[USB] Failed to get device descriptor\n");
         return -1;
     }
     
@@ -140,7 +140,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     dev->address = g_usb.device_count; // Temporary
     if (usb_control_msg(dev, USB_DIR_OUT | USB_REQ_TYPE_STANDARD | USB_RECIP_DEVICE,
                         USB_REQ_SET_ADDRESS, dev->address, 0, 0, NULL, 1000) < 0) {
-        tio_printf("[USB] Failed to set address\n");
+        tio_printerr("[USB] Failed to set address\n");
         return -1;
     }
     
@@ -150,7 +150,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     // 3. Get full device descriptor
     if (usb_get_descriptor(dev, USB_DESC_DEVICE, 0, &dev->device_desc, 
                            sizeof(usb_device_desc_t)) < 0) {
-        tio_printf("[USB] Failed to get full device descriptor\n");
+        tio_printerr("[USB] Failed to get full device descriptor\n");
         return -1;
     }
     
@@ -166,7 +166,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     // 4. Get configuration descriptor
     uint8_t config_buf[256];
     if (usb_get_descriptor(dev, USB_DESC_CONFIGURATION, 0, config_buf, 9) < 0) {
-        tio_printf("[USB] Failed to get config header\n");
+        tio_printerr("[USB] Failed to get config header\n");
         return -1;
     }
     
@@ -174,7 +174,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     if (total_len > 256) total_len = 256;
     
     if (usb_get_descriptor(dev, USB_DESC_CONFIGURATION, 0, config_buf, total_len) < 0) {
-        tio_printf("[USB] Failed to get full config\n");
+        tio_printerr("[USB] Failed to get full config\n");
         return -1;
     }
     
@@ -225,7 +225,7 @@ int usb_device_enumerate(usb_device_t* dev) {
     if (usb_control_msg(dev, USB_DIR_OUT | USB_REQ_TYPE_STANDARD | USB_RECIP_DEVICE,
                         USB_REQ_SET_CONFIGURATION, dev->config_desc.bConfigurationValue,
                         0, 0, NULL, 1000) < 0) {
-        tio_printf("[USB] Failed to set configuration\n");
+        tio_printerr("[USB] Failed to set configuration\n");
         return -1;
     }
     
@@ -489,6 +489,6 @@ void usb_dump_all(void) {
     }
     
     if (g_usb.device_count == 0) {
-        tio_printf("No USB devices found\n");
+        tio_printerr("No USB devices found\n");
     }
 }

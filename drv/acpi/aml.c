@@ -749,7 +749,7 @@ bool aml_find_power_button(aml_context_t *ctx) {
         return true;
     }
     
-    tio_printf("[AML] No power button found, using legacy PM1 method\n");
+    tio_printerr("[AML] No power button found, using legacy PM1 method\n");
     return false;
 }
 
@@ -791,7 +791,7 @@ void aml_print_info(aml_context_t *ctx) {
                        ctx->pwr_info.power_button_bit);
         }
     } else {
-        tio_printf("Power button: NOT FOUND (using legacy)\n");
+        tio_printerr("Power button: NOT FOUND (using legacy)\n");
     }
     
     tio_printf("GPE handlers: %d\n", ctx->gpe_count);

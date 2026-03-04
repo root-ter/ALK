@@ -6,7 +6,7 @@
 #include <stdbool.h>
 
 /* Максимальное количество дисков в системе */
-#define MAX_BLOCK_DEVS 32
+#define MAX_BLOCK_DEVS 16
 #define BLOCKDEV_NAME_LEN 32
 
 /* Типы блочных устройств */

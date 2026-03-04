@@ -219,7 +219,7 @@ static void* ehci_alloc_dma(ehci_controller_t* ctrl) {
     
     uint64_t addr = (uint64_t)phys;
     if (addr > 0xFFFFFFFF) {
-        tio_printf("[EHCI] ERROR: DMA >4GB\n");
+        tio_printerr("[EHCI] ERROR: DMA >4GB\n");
         pmm_free_page(ctrl->pmm, phys);
         return NULL;
     }
@@ -267,13 +267,13 @@ static bool ehci_find_controller(ehci_controller_t* ctrl) {
     // Find USB 2.0 controller (class=0x0C, subclass=0x03)
     pci_device_t* pci = pci_find_class(0x0C, 0x03);
     if (!pci) {
-        tio_printf("[EHCI] No controller found\n");
+        tio_printerr("[EHCI] No controller found\n");
         return false;
     }
     
     // Check if it's EHCI (ProgIF=0x20)
     if (pci->prog_if != 0x20) {
-        tio_printf("[EHCI] Not EHCI (ProgIF=0x%02X)\n", pci->prog_if);
+        tio_printerr("[EHCI] Not EHCI (ProgIF=0x%02X)\n", pci->prog_if);
         free(pci);
         return false;
     }
@@ -290,7 +290,7 @@ static bool ehci_find_controller(ehci_controller_t* ctrl) {
     // Get BAR0
     uint64_t bar = pci->bars[0] & ~0xF;
     if (!bar) {
-        tio_printf("[EHCI] No BAR0\n");
+        tio_printerr("[EHCI] No BAR0\n");
         free(pci);
         return false;
     }
@@ -353,7 +353,7 @@ static bool ehci_start(ehci_controller_t* ctrl) {
     // 1. Allocate frame list
     ctrl->frame_list = (uint32_t*)ehci_alloc_dma(ctrl);
     if (!ctrl->frame_list) {
-        tio_printf("[EHCI] Failed to allocate frame list\n");
+        tio_printerr("[EHCI] Failed to allocate frame list\n");
         return false;
     }
     
@@ -442,7 +442,7 @@ static bool ehci_start(ehci_controller_t* ctrl) {
     }
     
     uint32_t sts = ehci_read_op(ctrl, EHCI_USBSTS);
-    tio_printf("[EHCI] Failed to start, STS=0x%08X\n", sts);
+    tio_printerr("[EHCI] Failed to start, STS=0x%08X\n", sts);
     return false;
 }
 
@@ -556,7 +556,7 @@ void ehci_irq_handler(void) {
     
     // Handle errors
     if (sts & EHCI_STS_USBERR) {
-        tio_printf("[EHCI] USB error\n");
+        tio_printerr("[EHCI] USB error\n");
     }
     
     // Clear status
@@ -709,7 +709,7 @@ static int ehci_control_transfer(usb_device_t* dev, uint8_t bmRequestType,
             // Завершилось
             if (token & QTD_HALTED) {
                 // Ошибка
-                tio_printf("[EHCI] Control transfer failed: token=0x%08X\n", token);
+                tio_printerr("[EHCI] Control transfer failed: token=0x%08X\n", token);
                 
                 // Восстанавливаем
                 ctrl->async_qh->horiz_link = old_next;
@@ -772,11 +772,11 @@ static int ehci_bulk_transfer(usb_device_t* dev, uint8_t endpoint,
     
     // Определяем направление
     uint32_t dir;
-	if (endpoint & 0x80) {
+    if (endpoint & 0x80) {
 	    dir = QTD_PID_IN;
 	} else {
 	    dir = QTD_PID_OUT;
-	}
+    }
     uint8_t ep_num = endpoint & 0x7F;
     
     // Выделяем qTD

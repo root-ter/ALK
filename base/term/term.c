@@ -6,10 +6,13 @@
 #include <stdint.h>
 #include "../../drv/fb/fb.h"
 #include "../term/term.h"
+#include "cmd.h"
 
 extern term_t* term;
 
 extern volatile uint16_t tick_time;
+
+static volatile int term_thread_running = 1;
 
 void term_refresh_prompt(term_t* term);
 void term_redraw_cursor(term_t* term);
@@ -20,10 +23,10 @@ void term_redraw_cursor(term_t* term);
 #define DEFAULT_PROMPT "> "
 
 // Вспомогательные функции для работы с историей
-static char* get_history_line(term_t* term, uint32_t line_idx) {
+static history_line_t* get_history_line(term_t* term, uint32_t line_idx) {
     if (line_idx >= term->total_lines) return NULL;
     uint32_t idx = (term->history_start + line_idx) % term->history_size;
-    return &term->history_buffer[idx * (term->cols + 1)];
+    return &term->history_buffer[idx];
 }
 
 static char* get_screen_line(term_t* term, uint32_t screen_line) {
@@ -37,9 +40,11 @@ static void add_history_line(term_t* term, const char* line) {
         term->total_lines--;
     }
     
-    char* dest = &term->history_buffer[term->history_end * (term->cols + 1)];
-    strncpy(dest, line, term->cols);
-    dest[term->cols] = '\0';
+    history_line_t *dest = &term->history_buffer[term->history_end];
+    strncpy(dest->text, line, term->cols);
+    dest->text[term->cols] = '\0';
+    dest->fg = term->current_color.fg;  // СОХРАНЯЕМ ТЕКУЩИЙ ЦВЕТ ТЕКСТА
+    dest->bg = term->current_color.bg;  // И ФОН
     
     term->history_end = (term->history_end + 1) % term->history_size;
     term->total_lines++;
@@ -49,6 +54,8 @@ static void add_history_line(term_t* term, const char* line) {
 
 static void draw_prompt_line(term_t* term) {
     if (!term->prompt_enabled || !term->fb) return;
+
+    fb_set_color(term->fb, term->default_color.fg, term->default_color.bg);
     
     // Промпт всегда на последней видимой строке
     uint32_t prompt_line = term->rows - 1;
@@ -69,7 +76,7 @@ static void draw_prompt_line(term_t* term) {
                  term->bg_color);
     
     // 2. Рисуем текст промпта
-    fb_set_color(term->fb, term->fg_color, term->bg_color);
+    fb_set_color(term->fb, term->default_color.fg, term->default_color.bg);
     fb_set_cursor(term->fb, term->x, py);
     fb_print(term->fb, term->prompt_text);
     
@@ -91,12 +98,12 @@ static void draw_prompt_line(term_t* term) {
         if ((tick_time / 250) % 2 == 0) {
             // Рисуем курсор
             fb_set_cursor(term->fb, cursor_px, cursor_py);
-            fb_set_color(term->fb, term->fg_color, term->bg_color);
+            fb_set_color(term->fb, term->current_color.fg, term->current_color.bg);
             fb_put_char(term->fb, '_');
         } else {
             // Стираем курсор (рисуем пробел)
             fb_set_cursor(term->fb, cursor_px, cursor_py);
-            fb_set_color(term->fb, term->bg_color, term->bg_color);
+            fb_set_color(term->fb, term->current_color.fg, term->current_color.bg);
             fb_put_char(term->fb, ' ');
         }
     }
@@ -115,37 +122,45 @@ static void refresh_screen(term_t* term) {
                             (term->rows - (term->prompt_enabled ? 1 : 0)) + i;
         
         if (history_idx >= 0 && history_idx < (int32_t)term->total_lines) {
-            char* history_line = get_history_line(term, history_idx);
+            history_line_t* history_line = get_history_line(term, history_idx);
             char* screen_line = get_screen_line(term, i);
-            if (history_line && screen_line) {
-                strncpy(screen_line, history_line, term->cols);
-            }
-        }
-    }
-    
-    // Отрисовываем текст
-    for (uint32_t y = 0; y < term->rows - (term->prompt_enabled ? 1 : 0); y++) {
-        uint32_t py = term->y + y * term->char_height;
-        
-        // Очищаем строку
-        fb_fill_rect(term->fb,
-                     term->x, py,
-                     term->cols * term->char_width,
-                     FONT_HEIGHT,
-                     term->bg_color);
-        
-        // Рисуем текст строки
-        char* line_text = get_screen_line(term, y);
-        if (!line_text) continue;
-        
-        fb_set_color(term->fb, term->fg_color, term->bg_color);
-        for (uint32_t x = 0; x < term->cols; x++) {
-            char c = line_text[x];
-            if (c == ' ') continue;
             
-            uint32_t px = term->x + x * term->char_width;
-            fb_set_cursor(term->fb, px, py);
-            fb_put_char(term->fb, c);
+            if (history_line && screen_line) {
+                // Копируем текст в буфер
+                strncpy(screen_line, history_line->text, term->cols);
+                
+                // Рисуем строку
+                uint32_t py = term->y + i * term->char_height;
+                
+                // Очищаем строку фоном
+                fb_fill_rect(term->fb,
+                            term->x, py,
+                            term->cols * term->char_width,
+                            FONT_HEIGHT,
+                            history_line->bg);  // ← ИСПОЛЬЗУЕМ СОХРАНЁННЫЙ ФОН
+                
+                // Рисуем текст сохранённым цветом
+                fb_set_color(term->fb, history_line->fg, history_line->bg);
+                fb_set_cursor(term->fb, term->x, py);
+                
+                for (uint32_t x = 0; x < term->cols; x++) {
+                    char c = screen_line[x];
+                    if (c != ' ') {
+                        fb_put_char(term->fb, c);
+                    } else {
+                        // Курсор уже сдвинется сам, но мы его не двигаем вручную
+                        term->fb->cursor_x += term->char_width;
+                    }
+                }
+            }
+        } else {
+            // Пустая строка - просто очищаем
+            uint32_t py = term->y + i * term->char_height;
+            fb_fill_rect(term->fb,
+                        term->x, py,
+                        term->cols * term->char_width,
+                        FONT_HEIGHT,
+                        term->current_color.bg);
         }
     }
     
@@ -158,8 +173,6 @@ static void refresh_screen(term_t* term) {
 }
 
 // ==================== ИНИЦИАЛИЗАЦИЯ ====================
-
-// base/term/term.c - Новая версия term_init
 
 term_t* term_init(framebuffer_t* fb, uint32_t x, uint32_t y, 
                   uint32_t cols, uint32_t rows) {
@@ -201,7 +214,7 @@ term_t* term_init(framebuffer_t* fb, uint32_t x, uint32_t y,
     term->total_lines = 0;
     
     term->fg_color = (color_t){255, 255, 255};  // белый
-    term->bg_color = (color_t){128, 0, 128};    // фиолетовый (как у тебя)
+    term->bg_color = (color_t){0, 0, 0};
     
     term->lock = 0;
     term->needs_redraw = true;
@@ -213,10 +226,19 @@ term_t* term_init(framebuffer_t* fb, uint32_t x, uint32_t y,
     term->history_start = 0;
     term->history_end = 0;
     term->total_lines = 0;
+
+    term->default_color.fg = COLOR_LIGHT_GRAY;
+    term->default_color.bg = COLOR_BLACK;
+    term->current_color = term->default_color;
+    term->color_stack_ptr = 0;
+    term->bold = false;
+    term->underline = false;
+    
+    term_set_color(term, term->default_color.fg, term->default_color.bg);
     
     // Выделяем память под историю
     size_t history_bytes = term->history_size * (cols + 1);
-    term->history_buffer = (char*)malloc(history_bytes);
+    term->history_buffer = (history_line_t*)malloc(term->history_size * sizeof(history_line_t));
     if (!term->history_buffer) {
         free(term);
         return NULL;
@@ -321,6 +343,8 @@ void term_clear(term_t* term) {
 }
 
 void term_putc(term_t* term, char c) {
+    fb_set_color(term->fb, term->current_color.fg, term->current_color.bg);
+
     static char current_line[256];
     static uint32_t line_pos = 0;
     
@@ -462,7 +486,6 @@ void term_clear_input(term_t* term) {
     }
 }
 
-// Новая функция - перерисовывает только курсор
 void term_redraw_cursor(term_t* term) {
     if (!term || !term->prompt_enabled || !term->fb) return;
     
@@ -486,19 +509,19 @@ void term_redraw_cursor(term_t* term) {
     if ((tick_time / 125) % 2 == 0) {  // 0.25 сек при 500Hz
         // Рисуем курсор
         fb_set_cursor(term->fb, cursor_px, cursor_py);
-        fb_set_color(term->fb, term->fg_color, term->bg_color);
+        fb_set_color(term->fb, term->current_color.fg, term->current_color.bg);
         fb_put_char(term->fb, '_');
     } else {
         // Стираем курсор - нужно восстановить символ под курсором
         if (term->input_cursor < term->input_pos) {
             // Под курсором есть символ - рисуем его
             fb_set_cursor(term->fb, cursor_px, cursor_py);
-            fb_set_color(term->fb, term->fg_color, term->bg_color);
+            fb_set_color(term->fb, term->current_color.fg, term->current_color.bg);
             fb_put_char(term->fb, term->input_buffer[term->input_cursor]);
         } else {
             // Под курсором пусто - рисуем пробел
             fb_set_cursor(term->fb, cursor_px, cursor_py);
-            fb_set_color(term->fb, term->bg_color, term->bg_color);
+            fb_set_color(term->fb, term->current_color.fg, term->current_color.bg);
             fb_put_char(term->fb, ' ');
         }
     }
@@ -571,13 +594,6 @@ bool term_handle_input(term_t* term, char input_char, char** out_line) {
 }
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
-
-void term_set_color(term_t* term, color_t fg, color_t bg) {
-    term->fg_color = fg;
-    term->bg_color = bg;
-    term->needs_redraw = true;
-    refresh_screen(term);
-}
 
 void term_set_cursor(term_t* term, uint32_t x, uint32_t y) {
     // Эта функция теперь не влияет на графический курсор напрямую
@@ -1012,6 +1028,425 @@ void term_printf(term_t* term, const char* fmt, ...) {
     __sync_synchronize();
     __sync_lock_release(&term->lock);
 }
+void term_printerr(term_t* term, const char* fmt, ...) {
+    while (__sync_lock_test_and_set(&term->lock, 1)) {
+        asm volatile("pause");
+    }
+
+    term_push_color(term, COLOR_RED, term->current_color.bg);
+
+    __sync_synchronize();
+    char buffer[1024];
+    va_list args;
+    va_start(args, fmt);
+    
+    char* ptr = buffer;
+    const char* f = fmt;
+    
+    while (*f && (ptr - buffer) < 1023) {
+        if (*f == '%') {
+            f++;
+            
+            // Флаги форматирования
+            int width = 0;
+            int precision = -1;
+            bool zero_pad = false;
+            bool left_align = false;
+            bool alternate = false;
+            bool space = false;
+            bool plus = false;
+            
+            // Обработка флагов
+            while (1) {
+                if (*f == '-') {
+                    left_align = true;
+                    f++;
+                } else if (*f == '0') {
+                    zero_pad = true;
+                    f++;
+                } else if (*f == '#') {
+                    alternate = true;
+                    f++;
+                } else if (*f == ' ') {
+                    space = true;
+                    f++;
+                } else if (*f == '+') {
+                    plus = true;
+                    f++;
+                } else {
+                    break;
+                }
+            }
+            
+            // Ширина
+            while (*f >= '0' && *f <= '9') {
+                width = width * 10 + (*f - '0');
+                f++;
+            }
+            
+            // Точность
+            if (*f == '.') {
+                f++;
+                precision = 0;
+                while (*f >= '0' && *f <= '9') {
+                    precision = precision * 10 + (*f - '0');
+                    f++;
+                }
+            }
+            
+            // Модификаторы размера
+            bool is_long = false;
+            bool is_long_long = false;
+            bool is_size_t = false;
+            bool is_short = false;
+            bool is_char = false;
+            
+            if (*f == 'h') {
+                f++;
+                if (*f == 'h') {
+                    is_char = true;
+                    f++;
+                } else {
+                    is_short = true;
+                }
+            } else if (*f == 'l') {
+                f++;
+                if (*f == 'l') {
+                    is_long_long = true;
+                    f++;
+                } else {
+                    is_long = true;
+                }
+            } else if (*f == 'z') {
+                is_size_t = true;
+                f++;
+            } else if (*f == 't') {
+                // ptrdiff_t - обрабатываем как long
+                is_long = true;
+                f++;
+            } else if (*f == 'j') {
+                // intmax_t - обрабатываем как long long
+                is_long_long = true;
+                f++;
+            }
+            
+            switch (*f) {
+                case 'd':
+                case 'i': {
+                    long long val;
+                    if (is_long_long) {
+                        val = va_arg(args, long long);
+                    } else if (is_long) {
+                        val = va_arg(args, long);
+                    } else if (is_size_t) {
+                        val = (long long)va_arg(args, size_t);
+                    } else if (is_short) {
+                        val = (short)va_arg(args, int);
+                    } else if (is_char) {
+                        val = (signed char)va_arg(args, int);
+                    } else {
+                        val = va_arg(args, int);
+                    }
+                    
+                    char num_buf[32];
+                    char* num_ptr = num_buf + 31;
+                    *num_ptr = '\0';
+                    
+                    if (val == 0) {
+                        *--num_ptr = '0';
+                    } else {
+                        int is_neg = val < 0;
+                        if (is_neg) val = -val;
+                        
+                        while (val > 0) {
+                            *--num_ptr = '0' + (val % 10);
+                            val /= 10;
+                        }
+                        
+                        if (is_neg) *--num_ptr = '-';
+                        else if (plus) *--num_ptr = '+';
+                        else if (space) *--num_ptr = ' ';
+                    }
+                    
+                    // Если precision задана, используем ее вместо width для padding
+                    if (precision >= 0) {
+                        zero_pad = true; // Для precision заполняем нулями
+                        // Если width меньше, чем нужно для precision + знак, 
+                        // то width = precision + (знак?1:0)
+                        int len = num_buf + 31 - num_ptr;
+                        int digits_needed = precision;
+                        if (digits_needed > len) {
+                            if (num_buf[31 - len] == '-' || num_buf[31 - len] == '+' || num_buf[31 - len] == ' ') {
+                                digits_needed++; // Учитываем знак
+                            }
+                        }
+                        if (width < digits_needed) {
+                            width = digits_needed;
+                        }
+                    }
+                    
+                    // Дополнение пробелами/нулями
+                    int len = num_buf + 31 - num_ptr;
+                    if (width > len) {
+                        int pad = width - len;
+                        if (left_align) {
+                            // Выравнивание влево: число потом пробелы
+                            while (*num_ptr) *ptr++ = *num_ptr++;
+                            while (pad-- > 0) *ptr++ = ' ';
+                        } else {
+                            // Выравнивание вправо
+                            char pad_char = zero_pad ? '0' : ' ';
+                            if (pad_char == '0') {
+                                // Особый случай для отрицательных чисел с нулевым заполнением
+                                if (num_buf[31 - len] == '-') {
+                                    *ptr++ = '-';
+                                    num_ptr++; // Пропускаем минус
+                                    len--;
+                                    while (pad-- > 0) *ptr++ = '0';
+                                    while (*num_ptr) *ptr++ = *num_ptr++;
+                                } else if (num_buf[31 - len] == '+' || num_buf[31 - len] == ' ') {
+                                    *ptr++ = num_buf[31 - len];
+                                    num_ptr++; // Пропускаем знак
+                                    len--;
+                                    while (pad-- > 0) *ptr++ = '0';
+                                    while (*num_ptr) *ptr++ = *num_ptr++;
+                                } else {
+                                    while (pad-- > 0) *ptr++ = '0';
+                                    while (*num_ptr) *ptr++ = *num_ptr++;
+                                }
+                            } else {
+                                while (pad-- > 0) *ptr++ = ' ';
+                                while (*num_ptr) *ptr++ = *num_ptr++;
+                            }
+                        }
+                    } else {
+                        while (*num_ptr) *ptr++ = *num_ptr++;
+                    }
+                    break;
+                }
+                
+                case 'u': {
+                    unsigned long long val;
+                    if (is_long_long) {
+                        val = va_arg(args, unsigned long long);
+                    } else if (is_long) {
+                        val = va_arg(args, unsigned long);
+                    } else if (is_size_t) {
+                        val = (unsigned long long)va_arg(args, size_t);
+                    } else if (is_short) {
+                        val = (unsigned short)va_arg(args, unsigned int);
+                    } else if (is_char) {
+                        val = (unsigned char)va_arg(args, unsigned int);
+                    } else {
+                        val = va_arg(args, unsigned int);
+                    }
+                    
+                    char num_buf[32];
+                    char* num_ptr = num_buf + 31;
+                    *num_ptr = '\0';
+                    
+                    if (val == 0) {
+                        *--num_ptr = '0';
+                    } else {
+                        while (val > 0) {
+                            *--num_ptr = '0' + (val % 10);
+                            val /= 10;
+                        }
+                    }
+                    
+                    // Precision handling
+                    if (precision >= 0) {
+                        zero_pad = true;
+                        int len = num_buf + 31 - num_ptr;
+                        if (width < precision) {
+                            width = precision;
+                        }
+                    }
+                    
+                    // Дополнение
+                    int len = num_buf + 31 - num_ptr;
+                    if (width > len) {
+                        int pad = width - len;
+                        if (left_align) {
+                            while (*num_ptr) *ptr++ = *num_ptr++;
+                            while (pad-- > 0) *ptr++ = ' ';
+                        } else {
+                            char pad_char = zero_pad ? '0' : ' ';
+                            while (pad-- > 0) *ptr++ = pad_char;
+                            while (*num_ptr) *ptr++ = *num_ptr++;
+                        }
+                    } else {
+                        while (*num_ptr) *ptr++ = *num_ptr++;
+                    }
+                    break;
+                }
+                
+                case 'x':
+                case 'X': {
+                    unsigned long long val;
+                    if (is_long_long) {
+                        val = va_arg(args, unsigned long long);
+                    } else if (is_long) {
+                        val = va_arg(args, unsigned long);
+                    } else if (is_size_t) {
+                        val = (unsigned long long)va_arg(args, size_t);
+                    } else {
+                        val = va_arg(args, unsigned int);
+                    }
+                    
+                    char hex_buf[20];
+                    char* hex_ptr = hex_buf + 19;
+                    *hex_ptr = '\0';
+                    
+                    const char* hex_digits = (*f == 'X') ? "0123456789ABCDEF" : "0123456789abcdef";
+                    
+                    if (val == 0) {
+                        *--hex_ptr = '0';
+                    } else {
+                        while (val > 0) {
+                            *--hex_ptr = hex_digits[val & 0xF];
+                            val >>= 4;
+                        }
+                    }
+                    
+                    // Дополнение
+                    int len = hex_buf + 19 - hex_ptr;
+                    if (width > len) {
+                        int pad = width - len;
+                        if (left_align) {
+                            while (*hex_ptr) *ptr++ = *hex_ptr++;
+                            while (pad-- > 0) *ptr++ = ' ';
+                        } else {
+                            char pad_char = zero_pad ? '0' : ' ';
+                            while (pad-- > 0) *ptr++ = pad_char;
+                            while (*hex_ptr) *ptr++ = *hex_ptr++;
+                        }
+                    } else {
+                        while (*hex_ptr) *ptr++ = *hex_ptr++;
+                    }
+                    break;
+                }
+                
+                case 's': {
+                    char* str = va_arg(args, char*);
+                    if (!str) str = "(null)";
+                    
+                    int max_len = strlen(str);
+                    if (precision >= 0 && precision < max_len) {
+                        max_len = precision;
+                    }
+                    
+                    if (width > max_len) {
+                        int pad = width - max_len;
+                        if (left_align) {
+                            // Строка потом пробелы
+                            for (int i = 0; i < max_len; i++) *ptr++ = str[i];
+                            while (pad-- > 0) *ptr++ = ' ';
+                        } else {
+                            // Пробелы потом строка
+                            while (pad-- > 0) *ptr++ = ' ';
+                            for (int i = 0; i < max_len; i++) *ptr++ = str[i];
+                        }
+                    } else {
+                        for (int i = 0; i < max_len; i++) *ptr++ = str[i];
+                    }
+                    break;
+                }
+                
+                case 'c': {
+                    char c = (char)va_arg(args, int);
+                    
+                    if (width > 1) {
+                        int pad = width - 1;
+                        if (left_align) {
+                            *ptr++ = c;
+                            while (pad-- > 0) *ptr++ = ' ';
+                        } else {
+                            char pad_char = zero_pad ? '0' : ' ';
+                            while (pad-- > 0) *ptr++ = pad_char;
+                            *ptr++ = c;
+                        }
+                    } else {
+                        *ptr++ = c;
+                    }
+                    break;
+                }
+                
+                case 'p': {
+                    void* val = va_arg(args, void*);
+                    uintptr_t ival = (uintptr_t)val;
+                    
+                    char hex_buf[19];
+                    char* hex_ptr = hex_buf + 18;
+                    *hex_ptr = '\0';
+                    
+                    const char* hex_digits = "0123456789abcdef";
+                    
+                    if (ival == 0) {
+                        *--hex_ptr = '0';
+                    } else {
+                        while (ival > 0) {
+                            *--hex_ptr = hex_digits[ival & 0xF];
+                            ival >>= 4;
+                        }
+                    }
+                    
+                    // Добавление нулей
+                    int len = hex_buf + 18 - hex_ptr;
+                    if (len < 16) {
+                        while (len < 16) {
+                            *--hex_ptr = '0';
+                            len++;
+                        }
+                    }
+                    
+                    *--hex_ptr = 'x';
+                    *--hex_ptr = '0';
+                    
+                    // Вывод с учётом ширины
+                    len = hex_buf + 18 - hex_ptr;
+                    if (width > len) {
+                        int pad = width - len;
+                        if (left_align) {
+                            while (*hex_ptr) *ptr++ = *hex_ptr++;
+                            while (pad-- > 0) *ptr++ = ' ';
+                        } else {
+                            while (pad-- > 0) *ptr++ = ' ';
+                            while (*hex_ptr) *ptr++ = *hex_ptr++;
+                        }
+                    } else {
+                        while (*hex_ptr) *ptr++ = *hex_ptr++;
+                    }
+                    break;
+                }
+                
+                case '%': {
+                    *ptr++ = '%';
+                    break;
+                }
+                
+                default: {
+                    *ptr++ = '%';
+                    *ptr++ = *f;
+                    break;
+                }
+            }
+            f++;
+        } else {
+            *ptr++ = *f++;
+        }
+    }
+    
+    *ptr = '\0';
+    va_end(args);
+    
+    term_puts(term, buffer);
+    
+    term_pop_color(term);
+
+    __sync_synchronize();
+    __sync_lock_release(&term->lock);
+}
 
 void term_clear_prompt(term_t* term) {
     if (!term->prompt_enabled) return;
@@ -1116,7 +1551,7 @@ void term_refresh_prompt(term_t* term) {
                  term->bg_color);
     
     // Рисуем текст промпта
-    fb_set_color(term->fb, term->fg_color, term->bg_color);
+    fb_set_color(term->fb, term->default_color.fg, term->default_color.bg);
     fb_set_cursor(term->fb, term->x, py);
     fb_print(term->fb, term->prompt_text);
     
@@ -1149,4 +1584,89 @@ void term_vprintf(term_t* term, const char* fmt, va_list args) {
     char buffer[1024];
     vsnprintf(buffer, sizeof(buffer), fmt, args);  // <- vsprintf, не vsnprintf?
     term_puts(term, buffer);
+}
+
+void term_process_input(term_t *term) {
+    char c = kbd_getchar();
+    if (c == -1) return;
+    
+    // Используем встроенный буфер терминала
+    switch (c) {
+        case '\n':
+        case '\r':
+            if (term->input_pos > 0) {
+                term->input_buffer[term->input_pos] = '\0';
+                term_printf(term, "\n");
+                term_execute_command(term->input_buffer);
+                term->input_pos = 0;
+                term->input_cursor = 0;
+            }
+            term_refresh_prompt(term);
+            break;
+            
+        case '\b':
+            if (term->input_pos > 0 && term->input_cursor > 0) {
+                // Сдвигаем символы
+                for (uint32_t i = term->input_cursor - 1; i < term->input_pos; i++) {
+                    term->input_buffer[i] = term->input_buffer[i + 1];
+                }
+                term->input_pos--;
+                term->input_cursor--;
+            }
+            term_refresh_prompt(term);
+            break;
+            
+        case 0x03:  // Ctrl+C
+            term->input_pos = 0;
+            term->input_cursor = 0;
+            term->input_buffer[0] = '\0';
+            term_printf(term, "^C\n");
+            term_refresh_prompt(term);
+            break;
+            
+        default:
+            if (c >= 32 && c < 127 && term->input_pos < term->input_capacity) {
+                // Вставляем символ
+                if (term->input_cursor < term->input_pos) {
+                    for (uint32_t i = term->input_pos; i > term->input_cursor; i--) {
+                        term->input_buffer[i] = term->input_buffer[i - 1];
+                    }
+                }
+                term->input_buffer[term->input_cursor] = c;
+                term->input_pos++;
+                term->input_cursor++;
+            }
+            term_refresh_prompt(term);
+            break;
+    }
+}
+
+void term_set_color(term_t* term, color_t fg, color_t bg) {
+    term->current_color.fg = fg;
+    term->current_color.bg = bg;
+    term->fb->fg_color = fg;
+    term->fb->bg_color = bg;
+}
+
+void term_push_color(term_t* term, color_t fg, color_t bg) {
+    if (term->color_stack_ptr < TERM_COLOR_STACK_SIZE) {
+        term->color_stack[term->color_stack_ptr] = term->current_color;
+        term->color_stack_ptr++;
+    }
+    term_set_color(term, fg, bg);
+}
+
+void term_pop_color(term_t* term) {
+    if (term->color_stack_ptr > 0) {
+        term->color_stack_ptr--;
+        term->current_color = term->color_stack[term->color_stack_ptr];
+        term->fb->fg_color = term->current_color.fg;
+        term->fb->bg_color = term->current_color.bg;
+    } else {
+        term_reset_color(term);
+    }
+}
+
+void term_reset_color(term_t* term) {
+    term_set_color(term, term->default_color.fg, term->default_color.bg);
 }

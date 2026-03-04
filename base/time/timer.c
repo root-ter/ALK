@@ -262,3 +262,9 @@ void init_timer(uint32_t frequency)
     outb(PIT_COUNTER0, (uint8_t)(divisor & 0xFF));        // Low byte
     outb(PIT_COUNTER0, (uint8_t)((divisor >> 8) & 0xFF)); // High byte
 }
+
+uint64_t get_ticks_ms(void) {
+    // seconds и tick_time - глобальные переменные из timer.h
+    // tick_time считается в миллисекундах (0-999)
+    return (uint64_t)seconds * 1000 + tick_time;
+}

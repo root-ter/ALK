@@ -27,6 +27,8 @@ int tio_initialized(void);
  */
 void tio_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 
+void tio_printerr(const char* fmt, ...);
+
 /**
  * Форматированный вывод с готовым va_list.
  * Для внутреннего использования или если уже есть va_list.

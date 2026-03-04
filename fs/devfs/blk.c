@@ -1,4 +1,3 @@
-// fs/devfs/blk.c
 #include "devfs.h"
 #include "../../drv/block/blockdev.h"
 #include "../../base/mem/mem.h"
@@ -28,21 +27,49 @@ static device_driver_t blk_driver_template = {
 
 // Инициализация блочных устройств в указанной директории
 void devfs_init_blk(vfs_inode_t *dir) {
+    if (!dir) {
+        return;
+    }
+    
+    devfs_dir_list_t *list = devfs_get_dir_list(dir);
+    if (!list) {
+        tio_printerr("[DEVFS] init_blk: no list for dir\n");
+        return;
+    }
+    
     blockdev_t *devices[16];
     int count = blockdev_get_list(devices, 16);
     
     for (int i = 0; i < count; i++) {
-        // Создаем копию драйвера
+        // Проверяем устройство
+        if (!devices[i]) {
+            tio_printerr("[DEVFS] devfs_init_blk: device %d is NULL!\n", i);
+            continue;
+        }
+        
+        // Создаём драйвер
         device_driver_t *drv = (device_driver_t*)malloc(sizeof(device_driver_t));
-        memcpy(drv, &blk_driver_template, sizeof(device_driver_t));
+        if (!drv) {
+            tio_printerr("[DEVFS] devfs_init_blk: failed to allocate driver for %s\n", 
+                       devices[i]->name);
+            continue;
+        }
         
-        // Создаем узел в указанной директории
+        memset(drv, 0, sizeof(device_driver_t));
+        strcpy(drv->name, "block");
+        drv->read_blocks = blk_read_blocks;
+        drv->write_blocks = blk_write_blocks;
+        
+        // Создаём имя узла
         char node_name[32];
-        strncpy(node_name, devices[i]->name, 31);
-        node_name[31] = '\0';
+        strncpy(node_name, devices[i]->name, sizeof(node_name) - 1);
+        node_name[sizeof(node_name) - 1] = '\0';
         
-        devfs_mknod_in(dir, node_name, FT_BLKDEV, drv, devices[i]);
-        
-        tio_printf("[DEVFS] Registered blk/%s\n", node_name);
+        // Создаём узел
+        int ret = devfs_mknod_in(dir, node_name, FT_BLKDEV, drv, devices[i]);
+    }
+
+    if (list) {
+        tio_printf("[DEVFS] devfs_init_blk: final count in dir = %d\n", list->count);
     }
 }

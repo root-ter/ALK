@@ -15,4 +15,7 @@ void init_timer(uint32_t frequency);
 void wait(uint32_t delay_seconds);
 void mwait(uint32_t delay_milliseconds);
 
+// Возвращает текущее время в миллисекундах с момента старта
+uint64_t get_ticks_ms(void);
+
 #endif

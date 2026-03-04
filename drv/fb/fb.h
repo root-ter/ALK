@@ -79,6 +79,15 @@ void fb_draw_rect(framebuffer_t* fb, uint32_t x, uint32_t y, uint32_t w, uint32_
 void fb_fill_rect(framebuffer_t* fb, uint32_t x, uint32_t y, uint32_t w, uint32_t h, color_t color);
 void fb_draw_circle(framebuffer_t* fb, uint32_t x, uint32_t y, uint32_t radius, color_t color);
 void fb_fill_circle(framebuffer_t* fb, uint32_t x, uint32_t y, uint32_t radius, color_t color);
+// Рисование скругленного прямоугольника
+void fb_draw_rounded_rect(framebuffer_t* fb, uint32_t x, uint32_t y, 
+                          uint32_t w, uint32_t h, uint32_t radius, 
+                          color_t color);
+
+// Залитый скругленный прямоугольник
+void fb_fill_rounded_rect(framebuffer_t* fb, uint32_t x, uint32_t y,
+                          uint32_t w, uint32_t h, uint32_t radius,
+                          color_t color);
 
 // Работа с текстом
 void fb_set_color(framebuffer_t* fb, color_t fg, color_t bg);

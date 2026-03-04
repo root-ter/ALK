@@ -1,4 +1,3 @@
-// fs/devfs/devfs.h
 #ifndef DEVFS_H
 #define DEVFS_H
 
@@ -27,9 +26,19 @@ typedef struct devfs_node {
     char name[32];
     int type;  // FT_CHRDEV или FT_BLKDEV
     device_driver_t *driver;
-    void *private;  // Для блочных устройств - указатель на blockdev_t
+    void *private;
     struct devfs_node *next;
+    struct devfs_node *parent;
+    vfs_inode_t *inode;
+    vfs_inode_t *parent_inode;
 } devfs_node_t;
+
+// Для каждой директории свой список
+typedef struct {
+    devfs_node_t *first;
+    devfs_node_t *last;
+    int count;  // Счётчик элементов для отладки
+} devfs_dir_list_t;
 
 // Инициализация /dev
 void devfs_init(void);
@@ -52,5 +61,13 @@ void devfs_init_blk(vfs_inode_t *dir);
 
 // Глобальная переменная для корня devfs (нужна для сравнения в std.c)
 extern vfs_inode_t *devfs_root;
+
+// Чтобы другие файлы могли получить список
+static inline devfs_dir_list_t *devfs_get_dir_list(vfs_inode_t *dir) {
+    if (!dir || dir->i_mode != FT_DIR) return NULL;
+    devfs_node_t *node = (devfs_node_t*)dir->i_private;
+    if (!node || node->type != FT_DIR) return NULL;
+    return (devfs_dir_list_t*)node->private;
+}
 
 #endif

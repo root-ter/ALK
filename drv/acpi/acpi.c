@@ -389,7 +389,7 @@ bool acpi_init(void) {
     // Получаем RSDP из Multiboot2
     uint64_t rsdp_addr = get_rsdp_address();
     if (!rsdp_addr) {
-        tio_printf("[ACPI] RSDP not found via Multiboot2\n");
+        tio_printerr("[ACPI] RSDP not found via Multiboot2\n");
         return false;
     }
     
@@ -397,12 +397,12 @@ bool acpi_init(void) {
     
     // Проверяем RSDP
     if (memcmp(g_acpi_ctx.rsdp->signature, "RSD PTR ", 8) != 0) {
-        tio_printf("[ACPI] Invalid RSDP signature\n");
+        tio_printerr("[ACPI] Invalid RSDP signature\n");
         return false;
     }
     
     if (!acpi_checksum_valid((uint8_t*)g_acpi_ctx.rsdp, 20)) {
-        tio_printf("[ACPI] RSDP checksum invalid\n");
+        tio_printerr("[ACPI] RSDP checksum invalid\n");
         return false;
     }
     
@@ -425,13 +425,13 @@ bool acpi_init(void) {
     }
     
     if (!g_acpi_ctx.rsdt) {
-        tio_printf("[ACPI] No RSDT/XSDT found\n");
+        tio_printerr("[ACPI] No RSDT/XSDT found\n");
         return false;
     }
     
     // Проверяем RSDT/XSDT
     if (!acpi_checksum_valid((uint8_t*)g_acpi_ctx.rsdt, g_acpi_ctx.rsdt->header.length)) {
-        tio_printf("[ACPI] RSDT/XSDT checksum invalid\n");
+        tio_printerr("[ACPI] RSDT/XSDT checksum invalid\n");
         return false;
     }
     
@@ -579,14 +579,14 @@ void acpi_reboot(void) {
 // Выключение через ACPI (S5 state)
 void acpi_shutdown(void) {
     if (!g_acpi_ctx.fadt || !g_acpi_ctx.acpi_enabled) {
-        tio_printf("[ACPI] Shutdown not supported\n");
+        tio_printerr("[ACPI] Shutdown not supported\n");
         return;
     }
     
     // Входим в состояние S5 (soft off)
     uint16_t pm1a_port = g_acpi_ctx.fadt->pm1a_cnt_blk;
     if (!pm1a_port) {
-        tio_printf("[ACPI] No PM1a control port\n");
+        tio_printerr("[ACPI] No PM1a control port\n");
         return;
     }
     

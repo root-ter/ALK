@@ -117,6 +117,8 @@ typedef struct {
     int type;
 } mount_entry_t;
 
+extern vfs_inode_t *devfs_root;
+
 // ==================== API ДЛЯ ЯДРА ====================
 
 // Инициализация VFS

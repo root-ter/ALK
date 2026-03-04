@@ -1,7 +1,7 @@
-// fs/devfs/std.c
 #include "devfs.h"
 #include "../../base/term/tio.h"
 #include "../../drv/kbd/kbd.h"
+#include "../../libc/string.h"
 
 // Обработчик для stdout
 static int stdout_write(const void *buf, size_t count, size_t *written) {
@@ -35,9 +35,19 @@ static int stdin_read(void *buf, size_t count, size_t *read) {
 // Обработчик для stderr
 static int stderr_write(const void *buf, size_t count, size_t *written) {
     const char *str = (const char*)buf;
-    for (size_t i = 0; i < count; i++) {
-        tio_putc(str[i]);
-    }
+    
+    // Временный буфер для копирования (т.к. у нас нет гарантии, что строка нуль-терминирована)
+    char temp[1024];
+    size_t copy_len = count;
+    if (copy_len > sizeof(temp) - 1) 
+        copy_len = sizeof(temp) - 1;
+    
+    memcpy(temp, str, copy_len);
+    temp[copy_len] = '\0';
+    
+    // Выводим через tio_printerr (красным)
+    tio_printerr("%s", temp);
+    
     *written = count;
     return 0;
 }
@@ -73,6 +83,4 @@ void devfs_init_std(vfs_inode_t *dir) {
     devfs_mknod_in(dir, "stdin", FT_CHRDEV, &stdin_driver, NULL);
     devfs_mknod_in(dir, "stdout", FT_CHRDEV, &stdout_driver, NULL);
     devfs_mknod_in(dir, "stderr", FT_CHRDEV, &stderr_driver, NULL);
-    
-    tio_printf("[DEVFS] Registered std devices in %s\n", dir == devfs_root ? "/dev" : "/std");
 }

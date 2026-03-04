@@ -138,18 +138,18 @@ void blockdev_init(void) {
 blockdev_t* blockdev_register(const char *name, blockdev_type_t type) {
     /* Проверки */
     if (!name || name[0] == '\0') {
-        tio_printf("[BLOCKDEV] Error: invalid device name\n");
+        tio_printerr("[BLOCKDEV] Error: invalid device name\n");
         return NULL;
     }
     
     if (blockdev_count >= MAX_BLOCK_DEVS) {
-        tio_printf("[BLOCKDEV] Error: maximum devices reached\n");
+        tio_printerr("[BLOCKDEV] Error: maximum devices reached\n");
         return NULL;
     }
     
     /* Проверяем, нет ли уже устройства с таким именем */
     if (blockdev_find(name)) {
-        tio_printf("[BLOCKDEV] Error: device '%s' already exists\n", 
+        tio_printerr("[BLOCKDEV] Error: device '%s' already exists\n", 
                     name);
         return NULL;
     }
@@ -157,7 +157,7 @@ blockdev_t* blockdev_register(const char *name, blockdev_type_t type) {
     /* Выделяем память */
     blockdev_t *dev = (blockdev_t*)malloc(sizeof(blockdev_t));
     if (!dev) {
-        tio_printf("[BLOCKDEV] Error: memory allocation failed\n");
+        tio_printerr("[BLOCKDEV] Error: memory allocation failed\n");
         return NULL;
     }
     
@@ -234,18 +234,18 @@ int blockdev_read(blockdev_t *dev, uint64_t lba,
     }
     
     if (dev->status != BLOCKDEV_READY) {
-        tio_printf("[BLOCKDEV] Device %s not ready for reading\n", 
+        tio_printerr("[BLOCKDEV] Device %s not ready for reading\n", 
                     dev->name);
         return -1;
     }
     
     if (lba + count > dev->total_sectors) {
-        tio_printf("[BLOCKDEV] Read out of bounds on %s\n", dev->name);
+        tio_printerr("[BLOCKDEV] Read out of bounds on %s\n", dev->name);
         return -1;
     }
     
     if (!dev->read_sectors) {
-        tio_printf("[BLOCKDEV] No read handler for %s\n", dev->name);
+        tio_printerr("[BLOCKDEV] No read handler for %s\n", dev->name);
         return -1;
     }
     
@@ -262,18 +262,18 @@ int blockdev_write(blockdev_t *dev, uint64_t lba,
     }
     
     if (dev->status != BLOCKDEV_READY) {
-        tio_printf("[BLOCKDEV] Device %s not ready for writing\n", 
+        tio_printerr("[BLOCKDEV] Device %s not ready for writing\n", 
                     dev->name);
         return -1;
     }
     
     if (lba + count > dev->total_sectors) {
-        tio_printf("[BLOCKDEV] Write out of bounds on %s\n", dev->name);
+        tio_printerr("[BLOCKDEV] Write out of bounds on %s\n", dev->name);
         return -1;
     }
     
     if (!dev->write_sectors) {
-        tio_printf("[BLOCKDEV] No write handler for %s\n", dev->name);
+        tio_printerr("[BLOCKDEV] No write handler for %s\n", dev->name);
         return -1;
     }
     
@@ -424,7 +424,7 @@ void blockdev_dump_all(void) {
     }
     
     if (blockdev_count == 0) {
-        tio_printf("No block devices found\n");
+        tio_printerr("No block devices found\n");
     }
 }
 

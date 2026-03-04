@@ -4,6 +4,19 @@
 #include "../../drv/fb/fb.h"
 #include <stdarg.h>
 
+typedef struct {
+    color_t fg;
+    color_t bg;
+} term_color_t;
+
+#define TERM_COLOR_STACK_SIZE 16
+
+typedef struct {
+    char text[256];      // Текст строки
+    color_t fg;          // Цвет текста
+    color_t bg;          // Цвет фона
+} history_line_t;
+
 // Терминал с историей и промптом
 typedef struct {
     framebuffer_t* fb;
@@ -19,10 +32,11 @@ typedef struct {
     uint32_t total_lines;             // Всего строк в истории
     
     // Буфер истории (кольцевой)
-    char* history_buffer;             // Буфер всех строк
+    history_line_t *history_buffer;
     uint32_t history_size;            // Максимальное количество строк
     uint32_t history_start;           // Индекс начала
     uint32_t history_end;             // Индекс конца
+    
     
     // Буфер экрана (для отображения)
     char* screen_buffer;              // Буфер видимых строк
@@ -44,6 +58,16 @@ typedef struct {
     bool needs_redraw;                // Нужна перерисовка
 
     volatile int lock;
+
+    term_color_t current_color;
+    term_color_t default_color;
+    term_color_t color_stack[TERM_COLOR_STACK_SIZE];
+    int color_stack_ptr;
+    
+    // Режимы
+    bool bold;
+    bool underline;
+    bool blink;
 } term_t;
 
 // Инициализация
@@ -79,8 +103,22 @@ void term_get_cursor(term_t* term, uint32_t* x, uint32_t* y);
 void term_clear_prompt(term_t* term);
 void term_redraw_cursor(term_t* term);
 
+void term_refresh_prompt(term_t* term);
+
 char* term_readline(term_t* term, const char* prompt);
 
 void term_vprintf(term_t* term, const char* fmt, va_list args);
+
+void term_process_input(term_t *term);
+
+void term_printerr(term_t *term, const char *fmt, ...);
+
+void term_set_color(term_t* term, color_t fg, color_t bg);
+void term_push_color(term_t* term, color_t fg, color_t bg);
+void term_pop_color(term_t* term);
+void term_reset_color(term_t* term);
+
+void term_set_bold(term_t* term, bool enable);
+void term_set_underline(term_t* term, bool enable);
 
 #endif

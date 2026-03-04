@@ -10,6 +10,7 @@
 #include "term.h"
 #include "../../fs/vfs/vfs.h"
 #include "../../fs/exfat/exfat.h"
+#include "../../fs/devfs/devfs.h"
 #include "../elfload/elfload.h"
 #include <stddef.h>
 
@@ -40,31 +41,27 @@ static int get_inode_name(vfs_inode_t *inode, char *name, int max_len) {
 char* build_path_recursive(vfs_inode_t *inode, char *buffer, int depth) {
     if (!inode || depth > 100) return buffer;
     
-    // Если это корень
     if (inode == fs_root) {
         buffer[0] = '/';
         buffer[1] = '\0';
         return buffer;
     }
     
-    // Получаем родителя
     vfs_inode_t *parent = NULL;
     if (vfs_parent(inode, &parent) != 0) {
         return buffer;
     }
     
-    // Рекурсивно строим путь родителя
-    if (parent != inode) {
-        build_path_recursive(parent, buffer, depth + 1);
-    }
+    build_path_recursive(parent, buffer, depth + 1);
     
-    // Добавляем свое имя через универсальную функцию
     char name[256];
     if (get_inode_name(inode, name, sizeof(name)) == 0 && name[0] != '\0') {
         int len = strlen(buffer);
+        
         if (len > 0 && buffer[len-1] != '/') {
             strcat(buffer, "/");
         }
+        
         strcat(buffer, name);
     }
     
@@ -82,18 +79,19 @@ static void update_current_path(void) {
         return;
     }
     
-    char temp[PATH_MAX];
-    temp[0] = '\0';
-    
     if (current_dir == fs_root) {
         strcpy(current_path, "/");
+        return;
+    }
+    
+    char temp[PATH_MAX];
+    temp[0] = '\0';
+    build_path_recursive(current_dir, temp, 0);
+    
+    if (temp[0] == '\0') {
+        strcpy(current_path, "/");
     } else {
-        build_path_recursive(current_dir, temp, 0);
-        if (temp[0] == '\0') {
-            strcpy(current_path, "/");
-        } else {
-            strcpy(current_path, temp);
-        }
+        strcpy(current_path, temp);
     }
 }
 
@@ -138,7 +136,7 @@ static void cmd_ps_simple(void) {
     int count = task_list(tasks, 32);
     
     if (count == 0) {
-        tio_printf("No tasks running\n");
+        tio_printerr("No tasks running\n");
         return;
     }
     
@@ -218,7 +216,7 @@ static void cmd_shutdown(void) {
     tio_printf("Shutting down...\n");
     acpi_shutdown();
     // Если ACPI не сработал, просто останавливаем
-    tio_printf("ACPI shutdown failed. System halted.\n");
+    tio_printerr("ACPI shutdown failed. System halted.\n");
     while(1) asm volatile("hlt");
 }
 
@@ -245,7 +243,6 @@ static void cmd_version(void) {
     tio_printf("ALK Kernel Version 0.03\n");
     tio_printf("Built: %s %s\n", __DATE__, __TIME__);
     tio_printf("Architecture: x86_64\n");
-    tio_printf("Author: 13-year-old kernel developer\n");
     tio_printf("Features:\n");
     tio_printf("  - 64-bit protected mode\n");
     tio_printf("  - Multiboot2 compliant\n");
@@ -266,19 +263,19 @@ static void cmd_echo(char* args) {
 
 static void cmd_kill(char* args) {
     if (!args || args[0] == '\0') {
-        tio_printf("Usage: kill <pid>\n");
+        tio_printerr("Usage: kill <pid>\n");
         return;
     }
     
     int pid = atoi(args);
     if (pid < 0) {
-        tio_printf("Invalid PID: %s\n", args);
+        tio_printerr("Invalid PID: %s\n", args);
         return;
     }
     
     // Нельзя убить PID 0 (ядро)
     if (pid == 0) {
-        tio_printf("Cannot kill kernel process (PID 0)\n");
+        tio_printerr("Cannot kill kernel process (PID 0)\n");
         return;
     }
     
@@ -286,7 +283,7 @@ static void cmd_kill(char* args) {
     if (result == 0) {
         tio_printf("Process %d terminated\n", pid);
     } else {
-        tio_printf("Failed to kill process %d\n", pid);
+        tio_printerr("Failed to kill process %d\n", pid);
     }
 }
 
@@ -317,7 +314,7 @@ static void cmd_disklist(void) {
     int count = blockdev_get_list(list, MAX_BLOCK_DEVS);
     
     if (count == 0) {
-        tio_printf("No block devices found\n");
+        tio_printerr("No block devices found\n");
         return;
     }
     
@@ -378,7 +375,7 @@ static void cmd_diskinfo(char* args) {
     
     // Проверяем, что устройство готово
     if (dev->status != BLOCKDEV_READY) {
-        tio_printf("Device '%s' is not ready (status: %d)\n", 
+        tio_printerr("Device '%s' is not ready (status: %d)\n", 
                     args, dev->status);
         return;
     }
@@ -425,7 +422,7 @@ static void cmd_diskread(char* args) {
     
     blockdev_t* dev = blockdev_find(dev_name);
     if (!dev) {
-        tio_printf("Device '%s' not found\n", dev_name);
+        tio_printerr("Device '%s' not found\n", dev_name);
         return;
     }
     
@@ -433,7 +430,7 @@ static void cmd_diskread(char* args) {
     uint32_t count = atoi(count_str);
     
     if (count == 0 || count > 256) {
-        tio_printf("Count must be 1-256\n");
+        tio_printerr("Count must be 1-256\n");
         return;
     }
     
@@ -442,7 +439,7 @@ static void cmd_diskread(char* args) {
     uint8_t* buffer = (uint8_t*)malloc(buffer_size);
     
     if (!buffer) {
-        tio_printf("Memory allocation failed\n");
+        tio_printerr("Memory allocation failed\n");
         return;
     }
     
@@ -460,7 +457,7 @@ static void cmd_diskread(char* args) {
         }
         tio_printf("\n");
     } else {
-        tio_printf("Read failed\n");
+        tio_printerr("Read failed\n");
     }
     
     free(buffer);
@@ -486,7 +483,7 @@ static void cmd_mount(char *args) {
     int count = blockdev_get_list(disks, 16);
     
     if (count == 0) {
-        tio_printf("No disks available\n");
+        tio_printerr("No disks available\n");
         return;
     }
     
@@ -509,7 +506,7 @@ static void cmd_mount(char *args) {
     // Парсим номер диска
     int disk_num = atoi(args);
     if (disk_num < 1 || disk_num > count) {
-        tio_printf("Invalid disk number\n");
+        tio_printerr("Invalid disk number\n");
         return;
     }
     
@@ -528,7 +525,7 @@ static void cmd_mount(char *args) {
         strcpy(current_path, "/");
         tio_printf("Mounted %s as exFAT\n", disk->name);
     } else {
-        tio_printf("Failed to mount %s (not exFAT?)\n", disk->name);
+        tio_printerr("Failed to mount %s (not exFAT?)\n", disk->name);
     }
 }
 
@@ -539,7 +536,7 @@ static void cmd_cat(char *args) {
     }
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -555,7 +552,7 @@ static void cmd_cat(char *args) {
         tio_printf("\n");
         vfs_close(file);
     } else {
-        tio_printf("File not found: %s\n", args);
+        tio_printerr("File not found: %s\n", args);
     }
 }
 
@@ -572,7 +569,7 @@ static void cmd_exformat(char *args) {
     
     int disk_num = atoi(args);
     if (disk_num < 1 || disk_num > count) {
-        tio_printf("Invalid disk number\n");
+        tio_printerr("Invalid disk number\n");
         return;
     }
     
@@ -592,7 +589,7 @@ static void cmd_exformat(char *args) {
             tio_printf("Mounted %s\n", disk->name);
         }
     } else {
-        tio_printf("Format failed!\n");
+        tio_printerr("Format failed!\n");
     }
 }
 
@@ -603,7 +600,7 @@ static void cmd_touch(char *args) {
     }
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -611,7 +608,7 @@ static void cmd_touch(char *args) {
     if (vfs_create(current_dir, args, FT_REG_FILE, &inode) == 0) {
         tio_printf("File created: %s\n", args);
     } else {
-        tio_printf("Failed to create file: %s\n", args);
+        tio_printerr("Failed to create file: %s\n", args);
     }
 }
 
@@ -623,7 +620,7 @@ static void cmd_mkdir(char *args) {
     }
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -632,7 +629,7 @@ static void cmd_mkdir(char *args) {
         tio_printf("Directory created: %s\n", args);
         vfs_free_inode(new_dir);  // Освобождаем, если не нужен
     } else {
-        tio_printf("Failed to create directory: %s\n", args);
+        tio_printerr("Failed to create directory: %s\n", args);
     }
 }
 // Удаление файла или директории
@@ -643,14 +640,14 @@ static void cmd_rm(char *args) {
     }
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
     if (vfs_unlink(current_dir, args) == 0) {
         tio_printf("Removed: %s\n", args);
     } else {
-        tio_printf("Failed to remove: %s\n", args);
+        tio_printerr("Failed to remove: %s\n", args);
     }
 }
 
@@ -679,7 +676,7 @@ static void cmd_write(char *args) {
     strcpy(text, space + 1);
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -690,11 +687,11 @@ static void cmd_write(char *args) {
         if (vfs_write(file, text, strlen(text), &written) == 0) {
             tio_printf("Written %d bytes to %s\n", written, filename);
         } else {
-            tio_printf("Write failed\n");
+            tio_printerr("Write failed\n");
         }
         vfs_close(file);
     } else {
-        tio_printf("Failed to open %s\n", filename);
+        tio_printerr("Failed to open %s\n", filename);
     }
 }
 
@@ -703,7 +700,7 @@ static void cmd_ls(char *args) {
     char *path = args;
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -719,18 +716,18 @@ static void cmd_ls(char *args) {
         // Обрабатываем путь
         if (path[0] == '/') {
             if (vfs_walk(fs_root, path, &new_dir) != 0) {
-                tio_printf("ls: %s: No such file or directory\n", path);
+                tio_printerr("ls: %s: No such file or directory\n", path);
                 return;
             }
         } else {
             if (vfs_walk(current_dir, path, &new_dir) != 0) {
-                tio_printf("ls: %s: No such file or directory\n", path);
+                tio_printerr("ls: %s: No such file or directory\n", path);
                 return;
             }
         }
         
         if (new_dir->i_mode != FT_DIR) {
-            tio_printf("ls: %s: Not a directory\n", path);
+            tio_printerr("ls: %s: Not a directory\n", path);
             vfs_free_inode(new_dir);
             return;
         }
@@ -791,7 +788,7 @@ static void cmd_rmdir(char *args) {
     }
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -799,91 +796,46 @@ static void cmd_rmdir(char *args) {
     if (vfs_rmdir(fs_root, args) == 0) {
         tio_printf("Directory removed: %s\n", args);
     } else {
-        tio_printf("Failed to remove directory: %s (not empty or not a directory)\n", args);
+        tio_printerr("Failed to remove directory: %s (not empty or not a directory)\n", args);
     }
 }
 
 static void cmd_cd(char *args) {
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
-    vfs_inode_t *new_dir;
+    vfs_inode_t *new_dir = NULL;
     
-    // Если аргументов нет, переходим в корень
     if (!args || args[0] == '\0') {
         new_dir = fs_root;
     } else {
-        // Убираем пробелы
         while (*args == ' ') args++;
-        
-        // Обрабатываем путь
-        if (args[0] == '/') {
-            // Абсолютный путь
-            if (vfs_walk(fs_root, args + 1, &new_dir) != 0) {
-                tio_printf("cd: %s: No such directory\n", args);
-                return;
-            }
-        } else if (strcmp(args, "..") == 0) {
-            // Переход на уровень вверх
-            if (current_dir == fs_root) {
-                new_dir = fs_root;
-            } else {
-                if (vfs_parent(current_dir, &new_dir) != 0) {
-                    tio_printf("cd: ..: Cannot get parent\n");
-                    return;
-                }
-            }
-        } else {
-            // Относительный путь
-            char full_path[PATH_MAX];
-            if (current_dir == fs_root) {
-                if (snprintf(full_path, sizeof(full_path), "/%s", args) >= (int)sizeof(full_path)) {
-                    tio_printf("cd: Path too long\n");
-                    return;
-                }
-            } else {
-                // Получаем полный путь через рекурсию
-                char current_path_copy[PATH_MAX];
-                strcpy(current_path_copy, current_path);
-                
-                if (current_path_copy[strlen(current_path_copy)-1] == '/') {
-                    snprintf(full_path, sizeof(full_path), "%s%s", current_path_copy, args);
-                } else {
-                    snprintf(full_path, sizeof(full_path), "%s/%s", current_path_copy, args);
-                }
-            }
-            
-            if (vfs_walk(fs_root, full_path + 1, &new_dir) != 0) {
-                tio_printf("cd: %s: No such directory\n", args);
-                return;
-            }
+        if (vfs_walk(current_dir, args, &new_dir) != 0) {
+            tio_printerr("cd: %s: No such directory\n", args);
+            return;
         }
     }
     
-    // Проверяем, что это директория
     if (new_dir->i_mode != FT_DIR) {
-        tio_printf("cd: %s: Not a directory\n", args);
+        tio_printerr("cd: %s: Not a directory\n", args);
         if (new_dir != fs_root) vfs_free_inode(new_dir);
         return;
     }
     
-    // Освобождаем старую директорию
-    if (current_dir && current_dir != fs_root) {
+    if (current_dir && current_dir != fs_root && current_dir != devfs_root) {
         vfs_free_inode(current_dir);
     }
     
     current_dir = new_dir;
     update_current_path();
-    
-    // Показываем новый путь
     tio_printf("%s\n", current_path);
 }
 
 static void cmd_pwd(void) {
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -897,7 +849,7 @@ static void cmd_exec(char *args) {
     }
     
     if (!fs_root) {
-        tio_printf("No filesystem mounted\n");
+        tio_printerr("No filesystem mounted\n");
         return;
     }
     
@@ -927,13 +879,13 @@ static void cmd_exec(char *args) {
     // Открываем файл
     vfs_file_t *file;
     if (vfs_open(current_dir, argv[0], O_READ, &file) != 0) {
-        tio_printf("exec: %s: not found\n", argv[0]);
+        tio_printerr("exec: %s: not found\n", argv[0]);
         return;
     }
     
     // Проверяем, что это ELF
     if (elf_check(file) != 0) {
-        tio_printf("exec: %s: not an ELF file\n", argv[0]);
+        tio_printerr("exec: %s: not an ELF file\n", argv[0]);
         vfs_close(file);
         return;
     }
@@ -944,8 +896,44 @@ static void cmd_exec(char *args) {
     if (pid > 0) {
         tio_printf("[%d]\n", pid);
     } else {
-        tio_printf("exec: %s: failed to load\n", argv[0]);
+        tio_printerr("exec: %s: failed to load\n", argv[0]);
     }
+}
+
+static void cmd_debug_devfs(void) {
+    tio_printf("\n=== DEVFS DEBUG ===\n");
+    
+    // Проверяем корень /dev
+    tio_printf("devfs_root = %p\n", devfs_root);
+    if (devfs_root) {
+        devfs_dir_list_t *root_list = (devfs_dir_list_t*)devfs_root->i_private;
+        tio_printf("root_list->count = %d\n", root_list ? root_list->count : -1);
+    }
+    
+    // Находим /dev/blk через VFS
+    vfs_inode_t *blk_dir = NULL;
+    if (vfs_walk(devfs_root, "blk", &blk_dir) == 0) {
+        tio_printf("vfs_walk(devfs_root, 'blk') = %p\n", blk_dir);
+        
+        if (blk_dir) {
+            devfs_dir_list_t *blk_list = devfs_get_dir_list(blk_dir);
+            tio_printf("blk_list->count = %d\n", blk_list ? blk_list->count : -1);
+            
+            // Прямой обход списка
+            if (blk_list) {
+                devfs_node_t *entry = blk_list->first;
+                int i = 0;
+                while (entry) {
+                    tio_printf("  entry[%d]: '%s'\n", i++, entry->name);
+                    entry = entry->next;
+                }
+            }
+        }
+    } else {
+        tio_printerr("vfs_walk failed for 'blk'\n");
+    }
+    
+    tio_printf("===================\n");
 }
 
 // ==================== ОСНОВНАЯ ФУНКЦИЯ ОБРАБОТКИ КОМАНД ====================
@@ -1030,6 +1018,8 @@ int term_execute_command(char* cmdline) {
 	cmd_pwd();
     } else if (strcmp(cmd, "exec") == 0) {
 	cmd_exec(args);
+    } else if (strcmp(cmd, "debugfs") == 0) {
+    	cmd_debug_devfs();
     } else if (strcmp(cmd, "alk") == 0) {
         cmd_alk();
     } else {
@@ -1045,64 +1035,4 @@ int term_execute_command(char* cmdline) {
 
 void term_commands_init(void) {
     tio_printf("Command processor initialized\n");
-}
-
-// Функция для обработки ввода из прерывания клавиатуры
-void term_handle_command_input(char input_char) {
-    static char cmd_buffer[256];
-    static int cmd_pos = 0;
-    
-    switch (input_char) {
-        case '\n':
-        case '\r':
-            if (cmd_pos > 0) {
-                cmd_buffer[cmd_pos] = '\0';
-                term_printf(term, "\n");
-                
-                // Выполняем команду
-                term_execute_command(cmd_buffer);
-                
-                // Сбрасываем буфер
-                cmd_pos = 0;
-                
-                // Показываем промпт снова
-                if (term_is_prompt_enabled(term)) {
-                    tio_printf("> ");
-                }
-            } else {
-                // Просто новая строка
-                tio_printf("\n");
-                if (term_is_prompt_enabled(term)) {
-                    tio_printf("> ");
-                }
-            }
-            break;
-            
-        case '\b':
-            if (cmd_pos > 0) {
-                cmd_pos--;
-                // Нужно также обновить отображение
-                // Это делает term_handle_input в терминале
-            }
-            break;
-            
-        case 0x03:  // Ctrl+C
-            cmd_pos = 0;
-            term_printf(term, "^C\n");
-            if (term_is_prompt_enabled(term)) {
-                tio_printf("> ");
-            }
-            break;
-            
-        default:
-            if (input_char >= 32 && input_char < 127 && cmd_pos < 255) {
-                cmd_buffer[cmd_pos++] = input_char;
-            }
-            break;
-    }
-    
-    // Также передаём символ в терминал для отображения
-    // (но не возвращаем строку, так как мы сами обрабатываем команды)
-    char* dummy = NULL;
-    term_handle_input(term, input_char, &dummy);
 }

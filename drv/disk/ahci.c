@@ -52,7 +52,7 @@ static void ahci_port_stop_cmd(hba_port_t* port) {
     }
     
     if (ahci_get_ticks() >= timeout) {
-        tio_printf("[AHCI] StopCMD timeout\n");
+        tio_printerr("[AHCI] StopCMD timeout\n");
     }
     
     // Clear FRE (bit4)
@@ -70,7 +70,7 @@ static void ahci_port_start_cmd(hba_port_t* port) {
     }
     
     if (ahci_get_ticks() >= timeout) {
-        tio_printf("[AHCI] StartCMD timeout\n");
+        tio_printerr("[AHCI] StartCMD timeout\n");
     }
     
     // Set FRE (bit4) and ST (bit0)
@@ -210,7 +210,7 @@ static int ahci_port_access(ahci_port_t* port, uint64_t lba, uint32_t count,
     timeout = ahci_get_ticks() + 200; // 200ms timeout
     while ((regs->ci & (1 << slot)) && ahci_get_ticks() < timeout) {
         if (regs->is & HBA_PXIS_TFES) {
-            tio_printf("[AHCI] Task file error, SERR: %x\n", regs->serr);
+            tio_printerr("[AHCI] Task file error, SERR: %x\n", regs->serr);
             ahci_port_stop_cmd(regs);
             ahci_port_unlock(port);
             return -1;
@@ -219,7 +219,7 @@ static int ahci_port_access(ahci_port_t* port, uint64_t lba, uint32_t count,
     }
     
     if (ahci_get_ticks() >= timeout) {
-        tio_printf("[AHCI] Command timeout\n");
+        tio_printerr("[AHCI] Command timeout\n");
         ahci_port_stop_cmd(regs);
         ahci_port_unlock(port);
         return -1;
@@ -228,7 +228,7 @@ static int ahci_port_access(ahci_port_t* port, uint64_t lba, uint32_t count,
     ahci_port_stop_cmd(regs);
     
     if (regs->is & HBA_PXIS_TFES) {
-        tio_printf("[AHCI] Task file error after command\n");
+        tio_printerr("[AHCI] Task file error after command\n");
         ahci_port_unlock(port);
         return -1;
     }
@@ -245,7 +245,7 @@ static void ahci_port_identify(ahci_port_t* port) {
     
     int slot = ahci_find_cmd_slot(regs);
     if (slot == -1) {
-        tio_printf("[AHCI] No command slot for IDENTIFY\n");
+        tio_printerr("[AHCI] No command slot for IDENTIFY\n");
         return;
     }
     
@@ -305,7 +305,7 @@ static void ahci_port_identify(ahci_port_t* port) {
     timeout = ahci_get_ticks() + 200;
     while ((regs->ci & (1 << slot)) && ahci_get_ticks() < timeout) {
         if (regs->is & HBA_PXIS_TFES) {
-            tio_printf("[AHCI] IDENTIFY task file error\n");
+            tio_printerr("[AHCI] IDENTIFY task file error\n");
             ahci_port_stop_cmd(regs);
             return;
         }
@@ -315,7 +315,7 @@ static void ahci_port_identify(ahci_port_t* port) {
     ahci_port_stop_cmd(regs);
     
     if (regs->is & HBA_PXIS_TFES) {
-        tio_printf("[AHCI] IDENTIFY failed\n");
+        tio_printerr("[AHCI] IDENTIFY failed\n");
         return;
     }
     
@@ -444,7 +444,7 @@ static ahci_port_t* ahci_port_init(int port_num, hba_port_t* port_regs, hba_mem_
     }
     
     if ((port_regs->ssts & HBA_PXSSTS_DET) != HBA_PXSSTS_DET_PRESENT) {
-        tio_printf("[AHCI] Port %d: device not present\n", port_num);
+        tio_printerr("[AHCI] Port %d: device not present\n", port_num);
         port->status = AHCI_PORT_ERROR;
         return port;
     }
@@ -477,7 +477,7 @@ int ahci_init(void) {
     // Actually in your PCI code, SATA is class 0x01, subclass 0x06
     g_ahci_pci_dev = pci_find_class(0x01, 0x06);
     if (!g_ahci_pci_dev) {
-        tio_printf("[AHCI] No controller found\n");
+        tio_printerr("[AHCI] No controller found\n");
         return -1;
     }
     
@@ -491,7 +491,7 @@ int ahci_init(void) {
     // Get BAR5 (AHCI base address)
     g_ahci_phys_base = g_ahci_pci_dev->bars[5] & ~0xF;
     if (!g_ahci_phys_base) {
-        tio_printf("[AHCI] No BAR5\n");
+        tio_printerr("[AHCI] No BAR5\n");
         return -1;
     }
     

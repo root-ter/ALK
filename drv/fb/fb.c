@@ -315,6 +315,140 @@ void fb_fill_circle(framebuffer_t* fb, uint32_t x, uint32_t y, uint32_t radius, 
     }
 }
 
+void fb_draw_rounded_rect(framebuffer_t* fb, uint32_t x, uint32_t y, 
+                          uint32_t w, uint32_t h, uint32_t radius, 
+                          color_t color) {
+    if (!fb || w == 0 || h == 0) return;
+    
+    // Ограничиваем радиус, чтобы не было артефактов
+    if (radius > w / 2) radius = w / 2;
+    if (radius > h / 2) radius = h / 2;
+    
+    // Если радиус 0 - рисуем обычный прямоугольник
+    if (radius == 0) {
+        fb_draw_rect(fb, x, y, w, h, color);
+        return;
+    }
+    
+    // Рисуем 4 стороны (без углов)
+    // Верхняя горизонтальная линия (между скруглениями)
+    fb_draw_line(fb, x + radius, y, x + w - radius - 1, y, color);
+    
+    // Нижняя горизонтальная линия
+    fb_draw_line(fb, x + radius, y + h - 1, x + w - radius - 1, y + h - 1, color);
+    
+    // Левая вертикальная линия
+    fb_draw_line(fb, x, y + radius, x, y + h - radius - 1, color);
+    
+    // Правая вертикальная линия
+    fb_draw_line(fb, x + w - 1, y + radius, x + w - 1, y + h - radius - 1, color);
+    
+    // Рисуем 4 скругленных угла с помощью алгоритма Брезенхема для окружности
+    int32_t cx, cy;
+    int32_t dx = radius;
+    int32_t dy = 0;
+    int32_t err = 0;
+    
+    while (dx >= dy) {
+        // Верхний левый угол
+        cx = x + radius - dx;
+        cy = y + radius - dy;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        cx = x + radius - dy;
+        cy = y + radius - dx;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        // Верхний правый угол
+        cx = x + w - radius - 1 + dx;
+        cy = y + radius - dy;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        cx = x + w - radius - 1 + dy;
+        cy = y + radius - dx;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        // Нижний левый угол
+        cx = x + radius - dx;
+        cy = y + h - radius - 1 + dy;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        cx = x + radius - dy;
+        cy = y + h - radius - 1 + dx;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        // Нижний правый угол
+        cx = x + w - radius - 1 + dx;
+        cy = y + h - radius - 1 + dy;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        cx = x + w - radius - 1 + dy;
+        cy = y + h - radius - 1 + dx;
+        fb_set_pixel(fb, cx, cy, color);
+        
+        dy++;
+        err += 2 * dy + 1;
+        if (err > 2 * dx) {
+            dx--;
+            err -= 2 * dx + 2;
+        }
+    }
+}
+
+// Залитый скругленный прямоугольник
+void fb_fill_rounded_rect(framebuffer_t* fb, uint32_t x, uint32_t y,
+                          uint32_t w, uint32_t h, uint32_t radius,
+                          color_t color) {
+    if (!fb || w == 0 || h == 0) return;
+    
+    // Ограничиваем радиус
+    if (radius > w / 2) radius = w / 2;
+    if (radius > h / 2) radius = h / 2;
+    
+    // Если радиус 0 - заливаем обычный прямоугольник
+    if (radius == 0) {
+        fb_fill_rect(fb, x, y, w, h, color);
+        return;
+    }
+    
+    // Заливаем центральную часть (без углов)
+    fb_fill_rect(fb, x + radius, y, w - 2 * radius, radius, color); // Верхняя полоса
+    fb_fill_rect(fb, x + radius, y + h - radius, w - 2 * radius, radius, color); // Нижняя полоса
+    fb_fill_rect(fb, x, y + radius, w, h - 2 * radius, color); // Средняя часть
+    
+    // Заливаем углы с помощью алгоритма окружности
+    for (uint32_t dy = 0; dy < radius; dy++) {
+        uint32_t dx = radius - 1;
+        while (dx * dx + dy * dy > radius * radius) {
+            dx--;
+        }
+        
+        // Верхний левый угол
+        for (uint32_t ix = 0; ix < dx; ix++) {
+            fb_set_pixel(fb, x + radius - 1 - ix, y + radius - 1 - dy, color);
+            fb_set_pixel(fb, x + radius - 1 - dy, y + radius - 1 - ix, color);
+        }
+        
+        // Верхний правый угол
+        for (uint32_t ix = 0; ix < dx; ix++) {
+            fb_set_pixel(fb, x + w - radius + ix, y + radius - 1 - dy, color);
+            fb_set_pixel(fb, x + w - radius + dy, y + radius - 1 - ix, color);
+        }
+        
+        // Нижний левый угол
+        for (uint32_t ix = 0; ix < dx; ix++) {
+            fb_set_pixel(fb, x + radius - 1 - ix, y + h - radius + dy, color);
+            fb_set_pixel(fb, x + radius - 1 - dy, y + h - radius + ix, color);
+        }
+        
+        // Нижний правый угол
+        for (uint32_t ix = 0; ix < dx; ix++) {
+            fb_set_pixel(fb, x + w - radius + ix, y + h - radius + dy, color);
+            fb_set_pixel(fb, x + w - radius + dy, y + h - radius + ix, color);
+        }
+    }
+}
+
 // Установка цвета текста - БЕЗ ИЗМЕНЕНИЙ
 void fb_set_color(framebuffer_t* fb, color_t fg, color_t bg) {
     fb->fg_color = fg;

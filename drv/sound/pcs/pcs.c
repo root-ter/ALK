@@ -29,7 +29,7 @@ void pc_speaker_init(void)
 
     if (!pc_speaker_detect)
     {
-        tio_printf("[PCS] PCS not found");
+        tio_printerr("[PCS] PCS not found");
         return;
     }
 }

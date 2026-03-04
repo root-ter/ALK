@@ -262,11 +262,6 @@ void keyboard_handler(void)
     bool released = code & 0x80;
     uint8_t key = code & 0x7F;
 
-    if (!can_type&& !input_waiting) {
-    	pic_send_eoi(1);
-	return;
-    }
-
     // Обработка Ctrl
     if (key == KEY_LCONTROL || key == KEY_RCONTROL)
     {
@@ -310,15 +305,7 @@ void keyboard_handler(void)
     
     if (ch)
     {
-    	if (input_waiting) {
-    		kbd_buffer_push(ch);
-    	} else {
-    		// Передаём символ в систему команд терминала
-        	term_handle_command_input(ch);
-        
-        	// Также пушим в буфер для совместимости
-        	kbd_buffer_push(ch);
-    	}
+    	kbd_buffer_push(ch);
     }
 
     pic_send_eoi(1);

@@ -847,7 +847,7 @@ static int exfat_mount(blockdev_t *dev, vfs_inode_t **root) {
     
     // Проверяем сигнатуру
     if (memcmp(vbr->fs_name, "EXFAT   ", 8) != 0) {
-        tio_printf("[exFAT] Not an exFAT volume (bad signature)\n");
+        tio_printerr("[exFAT] Not an exFAT volume (bad signature)\n");
         free(exfat);
         return -1;
     }
@@ -940,7 +940,7 @@ void exfat_init(void) {
 
 int exfat_format(blockdev_t *dev) {
     if (!dev || dev->status != BLOCKDEV_READY) {
-        tio_printf("[exFAT] Device not ready\n");
+        tio_printerr("[exFAT] Device not ready\n");
         return -1;
     }
     
@@ -1013,7 +1013,7 @@ int exfat_format(blockdev_t *dev) {
     
     // Записываем VBR в сектор 0
     if (blockdev_write(dev, 0, 1, &vbr) != 0) {
-        tio_printf("[exFAT] Failed to write VBR\n");
+        tio_printerr("[exFAT] Failed to write VBR\n");
         return -1;
     }
     
@@ -1035,7 +1035,7 @@ int exfat_format(blockdev_t *dev) {
         if (blockdev_write(dev, fat_offset + i, 1, 
                           (uint8_t*)fat + i * sector_size) != 0) {
             free(fat);
-            tio_printf("[exFAT] Failed to write FAT\n");
+            tio_printerr("[exFAT] Failed to write FAT\n");
             return -1;
         }
     }
@@ -1051,7 +1051,7 @@ int exfat_format(blockdev_t *dev) {
     uint64_t root_sector = cluster_heap_offset + (root_cluster - 2) * sectors_per_cluster;
     if (blockdev_write(dev, root_sector, sectors_per_cluster, cluster_buf) != 0) {
         free(cluster_buf);
-        tio_printf("[exFAT] Failed to write root directory\n");
+        tio_printerr("[exFAT] Failed to write root directory\n");
         return -1;
     }
     free(cluster_buf);
